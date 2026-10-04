@@ -1,0 +1,13 @@
+{
+  "name": "@sensinth/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform-independent music brain: signal processing, sensor mapping, music theory, composer.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

@@ -1,0 +1,48 @@
+/** How fast a signal carries meaning; decides which musical layer it may drive. */
+export type Timescale = 'slow' | 'medium' | 'fast';
+
+/**
+ * Describes one scalar sensor channel. Multi-axis sensors are split into
+ * several channels (e.g. tilt pitch and tilt roll), each with its own `kind`.
+ */
+export interface SensorDescriptor {
+  /** Unique channel id, e.g. `phone.accel` or `pico-01.temperature`. */
+  id: string;
+  /** Semantic kind from the shared vocabulary (see `KNOWN_KINDS`), e.g. `light`. */
+  kind: string;
+  label: string;
+  unit?: string;
+  /** Physical range. Without `adaptive: true`, values are normalized against it as-is. */
+  range?: [number, number];
+  /** Learn the range from the data instead (default: true when `range` is missing). */
+  adaptive?: boolean;
+  /** Smallest raw span treated as full scale, so sensor noise at rest stays quiet. */
+  minSpan?: number;
+  /** Nominal samples per second. */
+  rateHz?: number;
+  /** Overrides the timescale inferred from `kind` and `rateHz`. */
+  timescale?: Timescale;
+  /** The value wraps around `range` (compass heading, hue). */
+  circular?: boolean;
+  /** The device or adapter that produces this channel. */
+  source?: string;
+}
+
+export interface SensorSample {
+  id: string;
+  /** Seconds, monotonic. */
+  t: number;
+  v: number;
+}
+
+/** Per-channel features, all derived from the normalized signal. */
+export interface Features {
+  /** Smoothed value, 0..1. */
+  level: number;
+  /** Smoothed rate of change, -1..1. */
+  trend: number;
+  /** How much the signal is moving right now, 0..1. */
+  activity: number;
+  /** Strength of an onset detected on the latest sample, 0 when none. */
+  onset: number;
+}
