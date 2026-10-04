@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0e1317" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#e8ecef" media="(prefers-color-scheme: light)" />
+    <meta name="description" content="Generative music from your phone sensors." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>Sensinth</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="top">
+        <h1 class="brand">sensinth</h1>
+        <div class="readout" aria-live="polite">
+          <span id="now-key">Stopped</span>
+          <span id="now-chord" class="readout-chord">–</span>
+          <span id="now-pos" class="readout-pos">–</span>
+        </div>
+      </header>
+
+      <div class="columns">
+        <div class="column">
+          <section class="panel transport" aria-label="Transport">
+            <canvas id="scope" class="scope" aria-hidden="true"></canvas>
+            <button id="play" class="play" type="button" aria-pressed="false">
+              <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5.5v13l10.5-6.5z" />
+              </svg>
+              <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+              </svg>
+              <span class="play-label">Play</span>
+            </button>
+            <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
+          </section>
+
+          <section class="panel" aria-labelledby="tempo-title">
+            <h2 id="tempo-title">Tempo</h2>
+            <div class="tempo">
+              <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
+              <output id="tempo-value" for="tempo" class="bpm">140</output>
+              <span class="bpm-unit">BPM</span>
+              <button id="tempo-up" class="step-btn" type="button" aria-label="Faster">+</button>
+              <button id="tap" class="tap" type="button">Tap</button>
+            </div>
+            <input
+              id="tempo"
+              type="range"
+              min="60"
+              max="200"
+              step="1"
+              value="140"
+              aria-label="Tempo in BPM"
+            />
+          </section>
+
+          <section class="panel" aria-labelledby="style-title">
+            <h2 id="style-title">Style</h2>
+            <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
+            <p id="style-desc" class="style-desc"></p>
+          </section>
+
+          <section class="panel" aria-labelledby="dials-title">
+            <h2 id="dials-title">Musical dials <span class="h2-note">set by sensors</span></h2>
+            <ul id="dials" class="dials"></ul>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="panel" aria-labelledby="sensors-title">
+            <div class="panel-head">
+              <h2 id="sensors-title">Sensors</h2>
+              <label class="switch">
+                <input id="sim-toggle" type="checkbox" checked />
+                <span class="switch-track" aria-hidden="true"></span>
+                Simulated
+              </label>
+            </div>
+            <ul id="sensors" class="sensors"></ul>
+            <p id="sensors-empty" class="empty" hidden>
+              No sensors connected. Turn on simulated sensors to hear the engine.
+            </p>
+          </section>
+        </div>
+      </div>
+
+      <footer class="foot">
+        Phase 1: simulated sensors drive the music. Phone sensors come next.
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
