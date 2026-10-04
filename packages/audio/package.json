@@ -1,0 +1,16 @@
+{
+  "name": "@sensinth/audio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Web Audio renderer for @sensinth/core note events.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@sensinth/core": "workspace:*"
+  }
+}

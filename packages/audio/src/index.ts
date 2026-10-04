@@ -1,0 +1,12 @@
+export { applyEnvelope } from './envelope';
+export { createImpulse, createSoftClipCurve } from './fx/reverb';
+export { ChipDrums } from './instruments/chipDrums';
+export { TonalInstrument } from './instruments/tonal';
+export type { Instrument } from './instruments/types';
+export { createNoiseBuffer } from './noise';
+export { analyze, encodeWav, renderOffline } from './offline';
+export type { OfflineRenderOptions, RenderStats } from './offline';
+export { Renderer } from './renderer';
+export { LookaheadScheduler } from './scheduler';
+export type { SchedulerOptions } from './scheduler';
+export { WaveTable } from './waves';
