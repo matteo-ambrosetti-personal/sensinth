@@ -28,6 +28,14 @@ const POINTER_Y: SensorDescriptor = {
   rateHz: 30,
   source: 'computer',
 };
+const FORCE: SensorDescriptor = {
+  id: 'computer.force',
+  kind: 'pointer.force',
+  label: 'Press force',
+  range: [0, 1],
+  rateHz: 30,
+  source: 'computer',
+};
 const KEYS: SensorDescriptor = {
   id: 'computer.keys',
   kind: 'keys.rate',
@@ -40,20 +48,28 @@ const KEYS: SensorDescriptor = {
   source: 'computer',
 };
 
+const CHANNELS = [SPEED, POINTER_X, POINTER_Y, FORCE, KEYS];
+
+/** Safari's Force Touch event: 1 at a click, 2 at a deep (force) click, up to 3. */
+type ForceEvent = MouseEvent & { webkitForce?: number };
+
 /**
  * A laptop has no motion sensor, so the trackpad, mouse and keyboard stand
  * in: pointer speed (and scrolling) drives energy, its height the melody's
- * register, left–right the timbre, and typing raises accents.
+ * register, left–right the timbre, how hard you press (Force Touch in
+ * Safari and the Mac app, pens elsewhere) and typing raise accents.
  */
 export class PointerSource implements WebSensorSource {
   readonly id = 'pointer';
   readonly label = 'Pointer & keys';
-  readonly description = 'Trackpad, mouse, scrolling and typing';
+  readonly description = 'Trackpad, mouse, scrolling, press force and typing';
   private distance = 0;
   private x = 0.5;
   private y = 0.5;
   private lastPos: { x: number; y: number } | undefined;
   private keyTimes: number[] = [];
+  private force = 0;
+  private forceTouch = false;
   private timer: ReturnType<typeof setInterval> | undefined;
   private lastTick = 0;
 
@@ -65,6 +81,17 @@ export class PointerSource implements WebSensorSource {
     this.lastPos = { x: e.clientX, y: e.clientY };
     this.x = Math.min(1, Math.max(0, e.clientX / w));
     this.y = Math.min(1, Math.max(0, 1 - e.clientY / h));
+  };
+  private readonly onPress = (e: PointerEvent) => {
+    // Force Touch reports through its own event; elsewhere a mouse button reads 0.5.
+    if (!this.forceTouch) this.force = e.buttons ? e.pressure : 0;
+  };
+  private readonly onRelease = () => {
+    this.force = 0;
+  };
+  private readonly onForce = (e: Event) => {
+    this.forceTouch = true;
+    this.force = Math.min(1, Math.max(0, ((e as ForceEvent).webkitForce ?? 0) / 3));
   };
   private readonly onWheel = (e: WheelEvent) => {
     this.distance += Math.min(400, Math.hypot(e.deltaX, e.deltaY));
@@ -78,8 +105,12 @@ export class PointerSource implements WebSensorSource {
   }
 
   async start(hub: SensorHub): Promise<void> {
-    for (const d of [SPEED, POINTER_X, POINTER_Y, KEYS]) hub.announce(d);
+    for (const d of CHANNELS) hub.announce(d);
     window.addEventListener('pointermove', this.onMove, { passive: true });
+    window.addEventListener('pointerdown', this.onPress, { passive: true });
+    window.addEventListener('pointermove', this.onPress, { passive: true });
+    window.addEventListener('pointerup', this.onRelease, { passive: true });
+    window.addEventListener('webkitmouseforcechanged', this.onForce);
     window.addEventListener('wheel', this.onWheel, { passive: true });
     window.addEventListener('keydown', this.onKey);
     this.lastTick = nowSeconds();
@@ -91,6 +122,7 @@ export class PointerSource implements WebSensorSource {
       hub.push({ id: SPEED.id, t, v: this.distance / dt });
       hub.push({ id: POINTER_X.id, t, v: this.x });
       hub.push({ id: POINTER_Y.id, t, v: this.y });
+      hub.push({ id: FORCE.id, t, v: this.force });
       hub.push({ id: KEYS.id, t, v: this.keyTimes.length });
       this.distance = 0;
     }, 33);
@@ -100,8 +132,12 @@ export class PointerSource implements WebSensorSource {
     if (this.timer !== undefined) clearInterval(this.timer);
     this.timer = undefined;
     window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('pointerdown', this.onPress);
+    window.removeEventListener('pointermove', this.onPress);
+    window.removeEventListener('pointerup', this.onRelease);
+    window.removeEventListener('webkitmouseforcechanged', this.onForce);
     window.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('keydown', this.onKey);
-    for (const d of [SPEED, POINTER_X, POINTER_Y, KEYS]) hub.remove(d.id);
+    for (const d of CHANNELS) hub.remove(d.id);
   }
 }

@@ -126,4 +126,8 @@ export const KIND_FX: Record<string, FxId> = {
   proximity: 'dive',
   'pointer.force': 'crush',
   'lid.angle': 'tapeStop',
+  cover: 'brake',
+  'motion.event': 'sweep',
+  'controller.buttons': 'stutter',
+  'midi.note': 'dubThrow',
 };

@@ -54,6 +54,31 @@ export const DEFAULT_MAPPING: MappingRules = {
     { kind: 'pointer.y', feature: 'level', macro: 'register' },
     { kind: 'pointer.x', feature: 'level', macro: 'texture' },
     { kind: 'keys.rate', feature: 'activity', macro: 'variation' },
+    { kind: 'pointer.force', feature: 'level', macro: 'energy', weight: 0.5 },
+    // Hinges, covers and the body.
+    { kind: 'lid.angle', feature: 'level', macro: 'space', weight: 0.6 },
+    { kind: 'lid.angle', feature: 'activity', macro: 'variation', weight: 0.5 },
+    { kind: 'proximity', feature: 'activity', macro: 'variation', weight: 0.5 },
+    { kind: 'magnetic.field', feature: 'level', macro: 'color', weight: 0.5 },
+    { kind: 'steps.rate', feature: 'level', macro: 'energy', weight: 0.8 },
+    // The machine itself: heat, load and power make it tenser and busier.
+    { kind: 'battery.power', feature: 'level', macro: 'tension', weight: 0.3 },
+    { kind: 'battery.temperature', feature: 'level', macro: 'brightness', weight: 0.3 },
+    { kind: 'temperature.device', feature: 'level', macro: 'texture', weight: 0.3 },
+    { kind: 'thermal', feature: 'level', macro: 'tension', weight: 0.5 },
+    { kind: 'cpu.load', feature: 'level', macro: 'variation', weight: 0.4 },
+    { kind: 'memory.pressure', feature: 'level', macro: 'tension', weight: 0.3 },
+    { kind: 'fan.speed', feature: 'level', macro: 'texture', weight: 0.4 },
+    { kind: 'network.rate', feature: 'level', macro: 'variation', weight: 0.3 },
+    { kind: 'wifi.rssi', feature: 'level', macro: 'color', weight: 0.4 },
+    { kind: 'bluetooth.devices', feature: 'level', macro: 'space', weight: 0.3 },
+    { kind: 'idle', feature: 'level', macro: 'energy', invert: true, weight: 0.4 },
+    { kind: 'screen.brightness', feature: 'level', macro: 'brightness', weight: 0.4 },
+    { kind: 'volume', feature: 'level', macro: 'energy', weight: 0.3 },
+    // Controllers: triggers push energy; sticks and knobs are spread over the
+    // dials by timescale, so each one moves something different.
+    { kind: 'controller.trigger', feature: 'level', macro: 'energy', weight: 0.7 },
+    { kind: 'controller.buttons', feature: 'activity', macro: 'variation', weight: 0.5 },
   ],
   triggers: [
     { kind: 'motion.accel', trigger: 'accent' },
@@ -62,6 +87,13 @@ export const DEFAULT_MAPPING: MappingRules = {
     { kind: 'camera.motion', trigger: 'fill', minStrength: 0.4 },
     { kind: 'keys.rate', trigger: 'accent' },
     { kind: 'pointer.speed', trigger: 'fill', minStrength: 0.8 },
+    { kind: 'pointer.force', trigger: 'accent' },
+    { kind: 'proximity', trigger: 'accent' },
+    { kind: 'cover', trigger: 'fill' },
+    { kind: 'lid.angle', trigger: 'fill', minStrength: 0.5 },
+    { kind: 'motion.event', trigger: 'fill' },
+    { kind: 'controller.buttons', trigger: 'accent' },
+    { kind: 'midi.note', trigger: 'accent' },
   ],
 };
 

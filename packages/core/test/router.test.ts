@@ -40,6 +40,36 @@ describe('Router', () => {
     expect(router.macros.brightness).toBeLessThan(0.1);
   });
 
+  it('maps the lid, the body and the machine itself', () => {
+    const hub = new SensorHub();
+    const kinds: Record<string, string> = {
+      'lid.angle': 'space',
+      'steps.rate': 'energy',
+      thermal: 'tension',
+      'cpu.load': 'variation',
+      'wifi.rssi': 'color',
+      'magnetic.field': 'color',
+      idle: 'energy',
+    };
+    for (const kind of Object.keys(kinds)) hub.announce({ id: kind, kind, label: kind });
+    const { macros, triggers } = new Router(hub).getRoutes();
+    for (const [kind, macro] of Object.entries(kinds)) {
+      expect(macros.find((r) => r.channelId === kind && !r.auto)?.macro).toBe(macro);
+    }
+    expect(macros.find((r) => r.channelId === 'idle')?.invert).toBe(true);
+    expect(triggers.find((r) => r.channelId === 'lid.angle')?.trigger).toBe('fill');
+  });
+
+  it('spreads knobs and sticks over different dials', () => {
+    const hub = new SensorHub();
+    for (let i = 0; i < 4; i++) {
+      hub.announce({ id: `knob${i}`, kind: 'midi.cc', label: `CC ${i}`, range: [0, 127] });
+    }
+    const { macros } = new Router(hub).getRoutes();
+    const dials = new Set(macros.filter((r) => r.channelId.startsWith('knob')).map((r) => r.macro));
+    expect(dials.size).toBe(4);
+  });
+
   it('auto-assigns unknown sensors by timescale', () => {
     const hub = new SensorHub();
     hub.announce({ id: 'pico.soil', kind: 'soil.moisture', label: 'Soil', timescale: 'slow' });
