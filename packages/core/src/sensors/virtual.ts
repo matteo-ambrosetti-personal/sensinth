@@ -15,3 +15,13 @@ export function placeKey(lat: number, lon: number, cellDegrees = 0.005): number 
   const b = Math.floor(lon / cellDegrees);
   return hashString(`${a},${b}`) % 12;
 }
+
+/**
+ * The same ≈500 m cell as a value in 0..1, for the `geo.place` channel: every
+ * place gets its own value, so moving somewhere else changes the fingerprint.
+ */
+export function placeValue(lat: number, lon: number, cellDegrees = 0.005): number {
+  const a = Math.floor(lat / cellDegrees);
+  const b = Math.floor(lon / cellDegrees);
+  return hashString(`place:${a},${b}`) / 2 ** 32;
+}

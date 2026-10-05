@@ -1,14 +1,24 @@
 import { LookaheadScheduler, Renderer } from '@sensinth/audio';
-import { Engine, SensorHub, type EngineSnapshot, type NoteEvent, type Style } from '@sensinth/core';
+import {
+  Engine,
+  SensorHub,
+  type EngineSnapshot,
+  type EngineView,
+  type NoteEvent,
+  type Style,
+} from '@sensinth/core';
 import { nowSeconds } from './sensors/source';
 import { ScreenWakeLock } from './wakeLock';
 
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
 const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
+/** Views kept for steps scheduled ahead of the audio clock. */
+const MAX_QUEUED_VIEWS = 32;
 
 /**
- * Wires sensors, the engine, the renderer and the clock together. Every press
- * of Play starts a new piece (new seed, new key) from the live sensors.
+ * Wires sensors, the engine, the renderer and the clock together. Every
+ * press of Play starts a new piece; the sensors pick everything in it. With
+ * no live sensor, nothing plays.
  */
 export class Player {
   readonly hub = new SensorHub();
@@ -23,6 +33,10 @@ export class Player {
   /** Times (sensor clock) of recently scheduled drum hits. */
   private recentHits: number[] = [];
   private soloId: string | undefined;
+  private readonly muted = new Set<string>();
+  /** Engine views waiting for their step to sound, oldest first. */
+  private views: { time: number; view: EngineView }[] = [];
+  private current: EngineView | undefined;
   /** Pitch class to start each new piece in, e.g. from the current place. */
   keyHint: () => number | undefined = () => undefined;
 
@@ -46,6 +60,11 @@ export class Player {
     return this.playing ? this.scope : undefined;
   }
 
+  /** A track's analyser (after its mute), while playing. */
+  trackAnalyser(slot: string): AnalyserNode | undefined {
+    return this.playing ? this.renderer?.analyser(slot) : undefined;
+  }
+
   /** While stopped, keeps the dials following the sensors. */
   idleUpdate(dt: number): void {
     if (!this.playing) {
@@ -55,7 +74,17 @@ export class Player {
   }
 
   snapshot(): EngineSnapshot | undefined {
-    return this.playing ? this.engine.snapshot() : undefined;
+    return this.view()?.snapshot;
+  }
+
+  /** What the engine did on the step that is sounding now. */
+  view(): EngineView | undefined {
+    if (!this.playing || !this.ctx) return undefined;
+    const now = this.ctx.currentTime;
+    while (this.views.length > 0 && (this.views[0] as { time: number }).time <= now) {
+      this.current = this.views.shift()?.view;
+    }
+    return this.current;
   }
 
   /** Must be called from a user gesture (browsers block audio otherwise). */
@@ -65,6 +94,8 @@ export class Player {
     await ctx.resume();
     this.ctx = ctx;
     this.engine = this.newEngine();
+    this.views = [];
+    this.current = undefined;
 
     this.scope = ctx.createAnalyser();
     this.scope.fftSize = 2048;
@@ -73,8 +104,10 @@ export class Player {
     out.connect(this.scope);
     const renderer = new Renderer(ctx, this.style, out);
     renderer.setTempo(this.bpm);
+    for (const slot of this.muted) renderer.setMuted(slot, true);
     this.renderer = renderer;
 
+    let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
     scheduler.onStep = (_step, time, stepSeconds) => {
       this.hub.markStale(nowSeconds());
@@ -82,10 +115,25 @@ export class Player {
       // The engine changes style on a bar line; follow it there.
       if (this.engine.currentStyle !== this.style) {
         this.style = this.engine.currentStyle;
-        renderer.loadStyle(this.style);
+        renderer.setStyle(this.style);
       }
-      renderer.update(this.engine.router.macros, time);
+      if (this.engine.genomeVersion !== version) {
+        version = this.engine.genomeVersion;
+        renderer.setTracks(this.engine.trackMachines());
+      }
+      const view = this.engine.view();
+      renderer.update(
+        {
+          macros: view.snapshot.macros,
+          globals: view.globals,
+          swing: view.swing,
+          tracks: view.tracks,
+        },
+        time,
+      );
       renderer.schedule(events, time, stepSeconds);
+      this.views.push({ time, view });
+      if (this.views.length > MAX_QUEUED_VIEWS) this.views.shift();
       this.noteHits(events, time - ctx.currentTime);
     };
     this.scheduler = scheduler;
@@ -98,6 +146,8 @@ export class Player {
     this.scheduler = undefined;
     this.renderer?.dispose();
     this.renderer = undefined;
+    this.views = [];
+    this.current = undefined;
     const ctx = this.ctx;
     this.ctx = undefined;
     if (ctx) setTimeout(() => void ctx.close(), 400);
@@ -108,6 +158,16 @@ export class Player {
   setSolo(channelId: string | undefined): void {
     this.soloId = channelId;
     this.engine.router.setSolo(channelId);
+  }
+
+  setMuted(slot: string, muted: boolean): void {
+    if (muted) this.muted.add(slot);
+    else this.muted.delete(slot);
+    this.renderer?.setMuted(slot, muted);
+  }
+
+  isMuted(slot: string): boolean {
+    return this.muted.has(slot);
   }
 
   setTempo(bpm: number): void {
@@ -129,7 +189,6 @@ export class Player {
     const engine = new Engine({
       style: this.style,
       hub: this.hub,
-      seed: Math.floor(Math.random() * 2 ** 31),
       ...(keyRoot !== undefined ? { keyRoot } : {}),
     });
     engine.router.setSolo(this.soloId);

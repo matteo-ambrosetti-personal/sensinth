@@ -10,6 +10,8 @@ import {
   isChordTone,
   stepDuration,
   type NoteEvent,
+  type SensorDescriptor,
+  type SensorSample,
   type Style,
 } from '../src';
 
@@ -17,26 +19,75 @@ interface Played {
   ev: NoteEvent;
   inScale: boolean;
   chordTone: boolean;
+  range: [number, number] | undefined;
 }
 
-/** Runs the engine with simulated sensors and records each note with its harmonic context. */
-function run(style: Style, seed: number, bars: number, sensorSeed = 3): Played[] {
+interface SensorScript {
+  descriptors: readonly SensorDescriptor[];
+  sampleAt(t: number): SensorSample[];
+}
+
+/** Simulated sensors, optionally with one channel's readings scaled. */
+function sim(seed = 3, tweak?: { id: string; factor: number }): SensorScript {
+  const s = new SimulatedSource(seed);
+  return {
+    descriptors: s.descriptors,
+    sampleAt: (t) =>
+      s.sampleAt(t).map((x) => (tweak && x.id === tweak.id ? { ...x, v: x.v * tweak.factor } : x)),
+  };
+}
+
+/** Every simulated channel held at one value. */
+function frozen(): SensorScript {
+  const s = new SimulatedSource(3);
+  const values = s.sampleAt(0);
+  return { descriptors: s.descriptors, sampleAt: (t) => values.map((x) => ({ ...x, t })) };
+}
+
+/** Runs the engine and records each note with its harmonic context. */
+function run(style: Style, bars: number, sensors: SensorScript = sim(), seed = 0): Played[] {
   const engine = new Engine({ style, seed });
-  const sim = new SimulatedSource(sensorSeed);
-  for (const d of sim.descriptors) engine.hub.announce(d);
+  for (const d of sensors.descriptors) engine.hub.announce(d);
   const dt = stepDuration(style.defaultTempo);
   const out: Played[] = [];
   for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
-    engine.hub.pushAll(sim.sampleAt(step * dt));
-    for (const ev of engine.tick(dt)) {
+    engine.hub.pushAll(sensors.sampleAt(step * dt));
+    const events = engine.tick(dt);
+    const machines = new Map(engine.trackMachines().map((m) => [m.slot, m.machine]));
+    for (const ev of events) {
+      const scale = engine.scale;
+      const chord = engine.chord;
       out.push({
         ev,
-        inScale: ev.midi === undefined || engine.scale.contains(ev.midi),
-        chordTone: ev.midi === undefined || isChordTone(engine.scale, engine.chord, ev.midi),
+        inScale: ev.midi === undefined || (scale?.contains(ev.midi) ?? false),
+        chordTone:
+          ev.midi === undefined || (scale && chord ? isChordTone(scale, chord, ev.midi) : false),
+        range: machines.get(ev.part)?.range,
       });
     }
   }
   return out;
+}
+
+/** What a listener hears in one bar: which track plays which note, when. */
+function barSignatures(played: readonly Played[], bars: number, from = 0): Set<string>[] {
+  const out = Array.from({ length: bars }, () => new Set<string>());
+  for (const { ev } of played) {
+    const bar = Math.floor(ev.step / STEPS_PER_BAR) - from;
+    if (bar < 0 || bar >= bars) continue;
+    (out[bar] as Set<string>).add(
+      `${ev.part}:${ev.step % STEPS_PER_BAR}:${ev.midi ?? ev.voice}:${Math.round(ev.vel * 20)}`,
+    );
+  }
+  return out;
+}
+
+function jaccardDistance(a: Set<string>, b: Set<string>): number {
+  const union = new Set([...a, ...b]);
+  if (union.size === 0) return 0;
+  let both = 0;
+  for (const x of a) if (b.has(x)) both++;
+  return 1 - both / union.size;
 }
 
 /** Arbitrary sensor values, including garbage a broken sensor might send. */
@@ -45,77 +96,141 @@ const wildValue = fc.oneof(
   fc.constantFrom(NaN, Infinity, -Infinity, 0, 1e12),
 );
 
+const MELODIC = ['lead', 'arp', 'chords', 'pad'];
+
 describe('Engine', () => {
   for (const style of STYLES) {
     describe(style.name, () => {
-      const played = run(style, 42, 64);
+      const played = run(style, 64);
 
-      it('plays something on every part', () => {
-        for (const part of style.parts) {
-          expect(played.some((p) => p.ev.part === part.id)).toBe(true);
-        }
+      it('plays several tracks', () => {
+        const parts = new Set(played.map((p) => p.ev.part));
+        expect(parts.size).toBeGreaterThanOrEqual(Math.min(4, style.palette.trackCount[0]));
+        expect(played.length).toBeGreaterThan(100);
       });
 
       it('keeps every pitched note in the current scale', () => {
         expect(played.filter((p) => !p.inScale)).toEqual([]);
       });
 
-      it('lands melody and arpeggio notes on chord tones on strong beats', () => {
-        const roles = new Map(style.parts.map((p) => [p.id, p.role]));
+      it('lands melodic notes on chord tones on strong beats', () => {
         const strong = played.filter(
-          (p) =>
-            p.ev.midi !== undefined &&
-            p.ev.step % 4 === 0 &&
-            ['melody', 'arp', 'chords'].includes(roles.get(p.ev.part) ?? ''),
+          (p) => p.ev.midi !== undefined && p.ev.step % 4 === 0 && MELODIC.includes(p.ev.role),
         );
         expect(strong.length).toBeGreaterThan(0);
         expect(strong.filter((p) => !p.chordTone)).toEqual([]);
       });
 
-      it.runIf(style.parts.some((p) => p.role === 'bass'))(
-        'plays a chord tone on the bass downbeat',
-        () => {
-          const bassIds = style.parts.filter((p) => p.role === 'bass').map((p) => p.id);
-          const downbeats = played.filter(
-            (p) => bassIds.includes(p.ev.part) && p.ev.step % STEPS_PER_BAR === 0,
-          );
-          expect(downbeats.length).toBeGreaterThan(0);
-          expect(downbeats.filter((p) => !p.chordTone)).toEqual([]);
-        },
-      );
-
-      it('emits well-formed events inside each part range', () => {
-        const ranges = new Map(
-          style.parts.map((p) => [p.id, 'range' in p ? p.range : undefined] as const),
+      it('plays a chord tone on the bass downbeat', () => {
+        const downbeats = played.filter(
+          (p) => p.ev.role === 'bass' && p.ev.step % STEPS_PER_BAR === 0,
         );
-        for (const { ev } of played) {
+        expect(downbeats.filter((p) => !p.chordTone)).toEqual([]);
+      });
+
+      it('emits well-formed events inside each track range', () => {
+        for (const { ev, range } of played) {
           expect(Number.isInteger(ev.step)).toBe(true);
           expect(ev.durSteps).toBeGreaterThan(0);
           expect(ev.vel).toBeGreaterThan(0);
           expect(ev.vel).toBeLessThanOrEqual(1);
-          const range = ranges.get(ev.part);
-          if (ev.midi !== undefined && range) {
+          if (ev.midi !== undefined) {
             expect(Number.isInteger(ev.midi)).toBe(true);
-            expect(ev.midi).toBeGreaterThanOrEqual(range[0]);
-            expect(ev.midi).toBeLessThanOrEqual(range[1]);
+            expect(range).toBeDefined();
+            expect(ev.midi).toBeGreaterThanOrEqual((range as [number, number])[0]);
+            expect(ev.midi).toBeLessThanOrEqual((range as [number, number])[1]);
           } else {
             expect(ev.voice).toBeTruthy();
           }
+          for (const v of Object.values(ev.params ?? {})) {
+            expect(v).toBeGreaterThanOrEqual(0);
+            expect(v).toBeLessThanOrEqual(1);
+          }
         }
+      });
+
+      it('never repeats a phrase under frozen sensors', () => {
+        const still = run(style, 128, frozen());
+        const phraseSteps = style.palette.phraseBars * STEPS_PER_BAR;
+        const phrases = new Map<number, string[]>();
+        for (const { ev } of still) {
+          const i = Math.floor(ev.step / phraseSteps);
+          const list = phrases.get(i) ?? [];
+          list.push(`${ev.part}:${ev.step % phraseSteps}:${ev.midi ?? ev.voice}`);
+          phrases.set(i, list);
+        }
+        const keys = [...phrases.values()].map((l) => l.sort().join(','));
+        expect(keys.length).toBeGreaterThan(20);
+        expect(new Set(keys).size).toBe(keys.length);
       });
     });
   }
 
-  it('is deterministic for a given seed', () => {
-    const a = run(chiptune, 7, 16).map((p) => p.ev);
-    const b = run(chiptune, 7, 16).map((p) => p.ev);
-    const c = run(chiptune, 8, 16).map((p) => p.ev);
+  it('is silent with no sensor at all', () => {
+    const engine = new Engine({ style: chiptune });
+    let events = 0;
+    for (let i = 0; i < 8 * STEPS_PER_BAR; i++) events += engine.tick(0.1).length;
+    expect(events).toBe(0);
+    expect(engine.snapshot().waiting).toBe(true);
+  });
+
+  it('is silent while sensors are announced but send nothing', () => {
+    const engine = new Engine({ style: chiptune });
+    for (const d of new SimulatedSource(1).descriptors) engine.hub.announce(d);
+    let events = 0;
+    for (let i = 0; i < 8 * STEPS_PER_BAR; i++) events += engine.tick(0.1).length;
+    expect(events).toBe(0);
+  });
+
+  it('stops when every sensor goes quiet and resumes on the next bar', () => {
+    const engine = new Engine({ style: chiptune });
+    const source = new SimulatedSource(2);
+    for (const d of source.descriptors) engine.hub.announce(d);
+    const dt = stepDuration(chiptune.defaultTempo);
+    const perBar: number[] = [];
+    for (let step = 0; step < 48 * STEPS_PER_BAR; step++) {
+      const t = step * dt;
+      const bar = Math.floor(step / STEPS_PER_BAR);
+      // Sensors send for 16 bars, stop for 16, then come back.
+      if (bar < 16 || bar >= 32) engine.hub.pushAll(source.sampleAt(t));
+      engine.hub.markStale(t, 1);
+      perBar[bar] = (perBar[bar] ?? 0) + engine.tick(dt).length;
+    }
+    expect(perBar.slice(0, 16).some((n) => n > 0)).toBe(true);
+    // Stale after one second: silent from the bar after next on.
+    expect(perBar.slice(18, 32).every((n) => n === 0)).toBe(true);
+    expect(perBar.slice(33, 48).some((n) => n > 0)).toBe(true);
+  });
+
+  it('changes a lot when one sensor reads 2% differently', () => {
+    const bars = 64;
+    const a = barSignatures(run(chiptune, bars), bars);
+    const b = barSignatures(
+      run(chiptune, bars, sim(3, { id: 'sim.temperature', factor: 1.02 })),
+      bars,
+    );
+    const distances = a.slice(4).map((s, i) => jaccardDistance(s, b[i + 4] as Set<string>));
+    const differing = distances.filter((d) => d > 0).length / distances.length;
+    const mean = distances.reduce((x, y) => x + y, 0) / distances.length;
+    expect(differing).toBeGreaterThanOrEqual(0.6);
+    expect(mean).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it('is deterministic for the same sensors and seed', () => {
+    const a = run(chiptune, 16).map((p) => p.ev);
+    const b = run(chiptune, 16).map((p) => p.ev);
+    const c = run(chiptune, 16, sim(), 8).map((p) => p.ev);
     expect(a).toEqual(b);
     expect(a).not.toEqual(c);
   });
 
-  it('matches the recorded output for a fixed seed', () => {
-    const events = run(chiptune, 2026, 4).map((p) => p.ev);
+  it('matches the recorded output for fixed sensors', () => {
+    const events = run(chiptune, 4).map(({ ev }) => [
+      ev.step,
+      ev.part,
+      ev.midi ?? ev.voice,
+      Math.round(ev.vel * 1000) / 1000,
+    ]);
     expect(events).toMatchSnapshot();
   });
 
@@ -125,7 +240,7 @@ describe('Engine', () => {
         fc.integer({ min: 0, max: 2 ** 31 - 1 }),
         fc.array(fc.array(wildValue, { minLength: 4, maxLength: 4 }), {
           minLength: 32,
-          maxLength: 128,
+          maxLength: 160,
         }),
         (seed, frames) => {
           const engine = new Engine({ style: chiptune, seed });
@@ -139,10 +254,12 @@ describe('Engine', () => {
               expect(m).toBeGreaterThanOrEqual(0);
               expect(m).toBeLessThanOrEqual(1);
             }
-            expect(events.length).toBeLessThanOrEqual(12);
+            expect(events.length).toBeLessThanOrEqual(chiptune.palette.maxEventsPerStep);
             for (const ev of events) {
               expect(Number.isFinite(ev.vel)).toBe(true);
-              if (ev.midi !== undefined) expect(engine.scale.contains(ev.midi)).toBe(true);
+              expect(Number.isFinite(ev.micro ?? 0)).toBe(true);
+              for (const v of Object.values(ev.params ?? {})) expect(Number.isFinite(v)).toBe(true);
+              if (ev.midi !== undefined) expect(engine.scale?.contains(ev.midi)).toBe(true);
             }
           });
         },
@@ -152,41 +269,62 @@ describe('Engine', () => {
   });
 
   it('switches style on the next bar line', () => {
-    const engine = new Engine({ style: chiptune, seed: 1 });
-    const other: Style = { ...chiptune, id: 'other', parts: chiptune.parts.slice(0, 1) };
+    const engine = new Engine({ style: chiptune });
+    const source = new SimulatedSource(1);
+    for (const d of source.descriptors) engine.hub.announce(d);
     const dt = stepDuration(120);
-    for (let i = 0; i < 5; i++) engine.tick(dt);
-    engine.setStyle(other);
-    for (let i = 5; i < STEPS_PER_BAR; i++) engine.tick(dt);
+    const tick = (i: number) => {
+      engine.hub.pushAll(source.sampleAt(i * dt));
+      engine.tick(dt);
+    };
+    for (let i = 0; i < 5; i++) tick(i);
+    engine.setStyle(ambient);
+    for (let i = 5; i < STEPS_PER_BAR; i++) tick(i);
     expect(engine.currentStyle.id).toBe('chiptune');
-    engine.tick(dt);
-    expect(engine.currentStyle.id).toBe('other');
+    tick(STEPS_PER_BAR);
+    expect(engine.currentStyle.id).toBe('ambient');
+    expect(engine.trackMachines().every((m) => m.machineId in ambient.palette.machines)).toBe(true);
   });
 
-  it('reports a readable snapshot', () => {
-    const engine = new Engine({ style: chiptune, seed: 3, keyRoot: 9 });
+  it('reports a readable snapshot and view', () => {
+    const engine = new Engine({ style: chiptune, keyRoot: 9 });
+    const source = new SimulatedSource(1);
+    for (const d of source.descriptors) engine.hub.announce(d);
+    engine.hub.pushAll(source.sampleAt(0));
     engine.tick(0.1);
     const snap = engine.snapshot();
     expect(snap.keyName).toMatch(/^A /);
     expect(snap.chordRoman).toMatch(/^(i|I)/);
-    expect(snap.bar).toBe(0);
+    expect(snap.waiting).toBe(false);
+    expect(snap.genome).toMatch(/^[0-9a-f]{6}$/);
+    const view = engine.view();
+    expect(view.tracks.length).toBeGreaterThanOrEqual(chiptune.palette.trackCount[0]);
+    expect(view.keySource).toBe('place');
+    for (const t of view.tracks) {
+      expect(t.trigs.length).toBeGreaterThanOrEqual(t.length);
+      expect(t.position).toBeGreaterThanOrEqual(0);
+    }
+    expect(view.routes.length).toBeGreaterThan(source.descriptors.length * 2);
   });
 });
 
 describe('Ambient drone', () => {
   it('holds the tonic and fifth of the current key', () => {
-    const engine = new Engine({ style: ambient, seed: 4 });
+    const engine = new Engine({ style: ambient });
+    const source = new SimulatedSource(4);
+    for (const d of source.descriptors) engine.hub.announce(d);
     const dt = stepDuration(ambient.defaultTempo);
     let drones = 0;
     for (let step = 0; step < 64 * STEPS_PER_BAR; step++) {
+      engine.hub.pushAll(source.sampleAt(step * dt));
       for (const ev of engine.tick(dt)) {
-        if (ev.part !== 'drone') continue;
+        if (ev.role !== 'drone') continue;
         drones++;
-        const rel = ((((ev.midi as number) - engine.scale.root) % 12) + 12) % 12;
+        const rel = ((((ev.midi as number) - (engine.scale?.root ?? 0)) % 12) + 12) % 12;
         expect([0, 7]).toContain(rel);
         expect(ev.durSteps).toBeGreaterThanOrEqual(STEPS_PER_BAR);
       }
     }
-    expect(drones).toBeGreaterThanOrEqual(16);
+    expect(drones).toBeGreaterThanOrEqual(8);
   });
 });

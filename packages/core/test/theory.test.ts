@@ -122,6 +122,30 @@ describe('voiceChord', () => {
   });
 });
 
+describe('voiceChord in tight ranges', () => {
+  it('keeps every chord tone inside the range, even ninth chords', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 11 }),
+        modeArb,
+        fc.integer({ min: 0, max: 6 }),
+        fc.integer({ min: 3, max: 5 }),
+        fc.integer({ min: 40, max: 70 }),
+        fc.integer({ min: 12, max: 24 }),
+        (root, mode, degree, size, lo, span) => {
+          const pcs = chordPitchClasses(new Scale(root, mode), { degree, size });
+          const v = voiceChord(pcs, lo, lo + span);
+          for (const n of v) {
+            expect(n).toBeGreaterThanOrEqual(lo);
+            expect(n).toBeLessThanOrEqual(lo + span);
+          }
+          expect(new Set(v.map((n) => mod(n, 12)))).toEqual(new Set(pcs));
+        },
+      ),
+    );
+  });
+});
+
 describe('euclid', () => {
   it('spreads hits evenly', () => {
     const str = (b: boolean[]) => b.map((x) => (x ? 'x' : '.')).join('');

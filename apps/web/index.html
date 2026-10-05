@@ -25,22 +25,46 @@
         </div>
       </header>
 
+      <section class="panel transport" aria-label="Transport">
+        <canvas id="scope" class="scope" aria-hidden="true"></canvas>
+        <button id="play" class="play" type="button" aria-pressed="false">
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5.5v13l10.5-6.5z" />
+          </svg>
+          <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+          </svg>
+          <span class="play-label">Play</span>
+        </button>
+        <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
+        <dl class="genome" aria-label="What the sensors chose">
+          <div>
+            <dt>Section</dt>
+            <dd id="g-section">–</dd>
+          </div>
+          <div>
+            <dt>Genome</dt>
+            <dd id="g-hash">–</dd>
+          </div>
+          <div>
+            <dt>Key</dt>
+            <dd id="g-key">–</dd>
+          </div>
+          <div>
+            <dt>Last rewrite</dt>
+            <dd id="g-change">–</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="panel play-only" aria-labelledby="tracks-title">
+        <h2 id="tracks-title">Tracks <span class="h2-note">written by the sensors</span></h2>
+        <ol id="tracks" class="tracks"></ol>
+        <p id="tracks-empty" class="empty">Press play to see each track.</p>
+      </section>
+
       <div class="columns">
         <div class="column">
-          <section class="panel transport" aria-label="Transport">
-            <canvas id="scope" class="scope" aria-hidden="true"></canvas>
-            <button id="play" class="play" type="button" aria-pressed="false">
-              <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M8 5.5v13l10.5-6.5z" />
-              </svg>
-              <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
-              </svg>
-              <span class="play-label">Play</span>
-            </button>
-            <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
-          </section>
-
           <section class="panel lab-only" aria-labelledby="lab-title" hidden>
             <div class="panel-head">
               <h2 id="lab-title">Sensor lab</h2>
@@ -188,6 +212,14 @@
           </section>
         </div>
       </div>
+
+      <section class="panel play-only" aria-labelledby="matrix-title">
+        <h2 id="matrix-title">
+          Modulation <span class="h2-note">what moves what, right now</span>
+        </h2>
+        <ul id="matrix" class="matrix"></ul>
+        <p id="matrix-empty" class="empty">Press play to see the routings.</p>
+      </section>
 
       <footer class="foot">Sensor readings stay on this device.</footer>
     </main>

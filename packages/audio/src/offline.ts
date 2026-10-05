@@ -1,13 +1,31 @@
-import { Engine, SimulatedSource, STEPS_PER_BAR, stepDuration, type Style } from '@sensinth/core';
+import {
+  Engine,
+  SimulatedSource,
+  STEPS_PER_BAR,
+  stepDuration,
+  type SensorDescriptor,
+  type SensorSample,
+  type Style,
+} from '@sensinth/core';
 import { Renderer } from './renderer';
+
+/** Sensor readings over time, e.g. `SimulatedSource` or a recording. */
+export interface SensorScript {
+  readonly descriptors: readonly SensorDescriptor[];
+  sampleAt(t: number): SensorSample[];
+}
 
 export interface OfflineRenderOptions {
   style: Style;
   bars: number;
   bpm?: number;
   seed?: number;
+  /** Sensors to play from; simulated ones (seeded by `sensorSeed`) by default. */
+  sensors?: SensorScript;
   sensorSeed?: number;
   sampleRate?: number;
+  /** Returns true for each track slot to mute. */
+  mute?: (slot: string) => boolean;
 }
 
 export interface RenderStats {
@@ -18,10 +36,12 @@ export interface RenderStats {
   /** Count of NaN or infinite samples. */
   nonFinite: number;
   events: number;
+  /** Track slots that existed during the render. */
+  tracks: string[];
 }
 
 /**
- * Renders a piece faster than real time with simulated sensors. Used by the
+ * Renders a piece faster than real time from a sensor script. Used by the
  * CI audio test and handy for exporting clips.
  */
 export async function renderOffline(
@@ -36,26 +56,46 @@ export async function renderOffline(
   const seconds = start + steps * stepSeconds + 2.5;
   const ctx = new OfflineAudioContext(2, Math.ceil(seconds * sampleRate), sampleRate);
 
-  const engine = new Engine({ style, seed: opts.seed ?? 1 });
-  const sim = new SimulatedSource(opts.sensorSeed ?? 7);
-  for (const d of sim.descriptors) engine.hub.announce(d);
+  const engine = new Engine({ style, seed: opts.seed ?? 0 });
+  const sensors = opts.sensors ?? new SimulatedSource(opts.sensorSeed ?? 7);
+  for (const d of sensors.descriptors) engine.hub.announce(d);
   const renderer = new Renderer(ctx, style);
   renderer.setTempo(bpm);
 
   let events = 0;
+  let version = -1;
+  const slots = new Set<string>();
   for (let step = 0; step < steps; step++) {
     const t = start + step * stepSeconds;
-    engine.hub.pushAll(sim.sampleAt(t));
+    engine.hub.pushAll(sensors.sampleAt(t));
     const evs = engine.tick(stepSeconds);
+    if (engine.genomeVersion !== version) {
+      version = engine.genomeVersion;
+      const machines = engine.trackMachines();
+      renderer.setTracks(machines);
+      for (const m of machines) {
+        slots.add(m.slot);
+        if (opts.mute) renderer.setMuted(m.slot, opts.mute(m.slot));
+      }
+    }
     events += evs.length;
-    renderer.update(engine.router.macros, t);
+    const view = engine.view();
+    renderer.update(
+      {
+        macros: view.snapshot.macros,
+        globals: view.globals,
+        swing: view.swing,
+        tracks: view.tracks,
+      },
+      t,
+    );
     renderer.schedule(evs, t, stepSeconds);
   }
   const buffer = await ctx.startRendering();
-  return { buffer, stats: { ...analyze(buffer), events } };
+  return { buffer, stats: { ...analyze(buffer), events, tracks: [...slots].sort() } };
 }
 
-export function analyze(buffer: AudioBuffer): Omit<RenderStats, 'events'> {
+export function analyze(buffer: AudioBuffer): Omit<RenderStats, 'events' | 'tracks'> {
   let peak = 0;
   let sumSq = 0;
   let nonFinite = 0;

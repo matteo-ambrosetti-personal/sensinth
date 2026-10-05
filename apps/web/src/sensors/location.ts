@@ -1,4 +1,4 @@
-import { placeKey, type SensorDescriptor, type SensorHub } from '@sensinth/core';
+import { placeKey, placeValue, type SensorDescriptor, type SensorHub } from '@sensinth/core';
 import { nowSeconds, SourceError, type WebSensorSource } from './source';
 
 const SPEED: SensorDescriptor = {
@@ -7,6 +7,15 @@ const SPEED: SensorDescriptor = {
   label: 'Speed',
   unit: 'm/s',
   minSpan: 3,
+  rateHz: 1,
+  source: 'phone',
+};
+const PLACE: SensorDescriptor = {
+  id: 'phone.place',
+  kind: 'geo.place',
+  label: 'Place',
+  range: [0, 1],
+  adaptive: false,
   rateHz: 1,
   source: 'phone',
 };
@@ -22,8 +31,9 @@ const ALTITUDE: SensorDescriptor = {
 
 /**
  * GPS: speed (walking, cycling, driving), altitude, and the place itself,
- * which picks the key of each new piece. Positions are only used on the
- * phone, never stored or sent.
+ * which picks the key of each new piece and, as the `geo.place` channel,
+ * gives every ≈500 m cell its own music. Positions are only used on the
+ * phone, never stored or sent; the channel carries only the cell's hash.
  */
 export class LocationSource implements WebSensorSource {
   readonly id = 'location';
@@ -47,6 +57,7 @@ export class LocationSource implements WebSensorSource {
   start(hub: SensorHub): Promise<void> {
     hub.announce(SPEED);
     hub.announce(ALTITUDE);
+    hub.announce(PLACE);
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const settle = (err?: SourceError) => {
@@ -80,6 +91,7 @@ export class LocationSource implements WebSensorSource {
         if (!this.last) return;
         const t = nowSeconds();
         hub.push({ id: SPEED.id, t, v: this.last.speed });
+        hub.push({ id: PLACE.id, t, v: placeValue(this.last.lat, this.last.lon) });
         if (this.last.alt !== null) hub.push({ id: ALTITUDE.id, t, v: this.last.alt });
       }, 1000);
     });
@@ -92,6 +104,7 @@ export class LocationSource implements WebSensorSource {
     this.timer = undefined;
     hub.remove(SPEED.id);
     hub.remove(ALTITUDE.id);
+    hub.remove(PLACE.id);
   }
 
   private update(pos: GeolocationPosition): void {

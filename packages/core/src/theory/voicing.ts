@@ -27,15 +27,14 @@ export function voiceChord(
     }
   }
   if (candidates.length === 0) {
-    // Range too narrow: close position from `lo`.
-    const v: number[] = [];
-    let n = lo - 1;
-    for (const pc of pcs) {
-      do n++;
-      while ((((n - pc) % 12) + 12) % 12 !== 0);
-      v.push(n);
-    }
-    return v;
+    // Range too narrow for any stacked voicing: each note at its lowest place
+    // in the range, which keeps every chord tone and stays inside [lo, hi].
+    return pcs
+      .map((pc) => {
+        const n = lo + ((((pc - lo) % 12) + 12) % 12);
+        return n <= hi ? n : n - 12;
+      })
+      .sort((a, b) => a - b);
   }
   const center = (lo + hi) / 2;
   let best = candidates[0] as number[];

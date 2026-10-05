@@ -1,7 +1,11 @@
-/** One note produced by the composer, always on the 16th-note grid. */
+import type { TrackParams } from '../mod/params';
+import type { Retrig, TrackRole } from '../seq/types';
+
+/** One note produced by the engine, always on the 16th-note grid. */
 export interface NoteEvent {
-  /** Part id from the style, e.g. `lead`, `bass`, `drums`. */
+  /** Track slot, e.g. `t1`. */
   part: string;
+  role: TrackRole;
   /** Absolute step index (16ths since start). */
   step: number;
   /** Length in steps (may be fractional). */
@@ -12,4 +16,10 @@ export interface NoteEvent {
   vel: number;
   /** Drum voice, e.g. `kick`, `snare`, `hat`. */
   voice?: string;
+  /** Offset from the grid, in steps (micro timing, track speed). */
+  micro?: number;
+  /** Repeats of the note, e.g. a hi-hat roll. */
+  retrig?: Retrig;
+  /** The track's parameters for this note (base or p-lock, plus modulation), 0..1. */
+  params?: TrackParams;
 }

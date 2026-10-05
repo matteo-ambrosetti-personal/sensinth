@@ -34,6 +34,7 @@ export const KNOWN_KINDS: Record<string, { timescale: Timescale; description: st
     description: 'Time of day as daylight, 0 midnight to 1 noon',
   },
   'geo.altitude': { timescale: 'slow', description: 'GPS altitude' },
+  'geo.place': { timescale: 'slow', description: 'Which ≈500 m cell you are in, as a value 0..1' },
 };
 
 export function timescaleOf(desc: SensorDescriptor): Timescale {

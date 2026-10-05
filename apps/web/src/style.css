@@ -865,3 +865,300 @@ h3 {
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+
+/* Play needs a sensor */
+.play:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Genome card: what the sensors chose */
+.genome {
+  margin: 0;
+  padding: 10px 16px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+@media (min-width: 880px) {
+  .genome {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.genome dt {
+  font: 600 10px/1.2 var(--font-body);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.genome dd {
+  margin: 2px 0 0;
+  font: 500 13px/1.35 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Tracks */
+.tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'head'
+    'scope'
+    'grid'
+    'params';
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  transition: opacity 150ms ease;
+}
+
+.track:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.track.is-muted {
+  opacity: 0.55;
+}
+
+@media (min-width: 880px) {
+  .track {
+    grid-template-columns: 11rem 7.5rem minmax(0, 1fr) 13rem;
+    grid-template-areas: 'head scope grid params';
+    align-items: start;
+    gap: 16px;
+  }
+}
+
+.track-head {
+  grid-area: head;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.track-slot {
+  font: 600 11px var(--font-mono);
+  color: var(--muted);
+}
+
+.track-name {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.track-meta {
+  flex-basis: 100%;
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--muted);
+}
+
+@media (max-width: 879px) {
+  .track-meta {
+    flex-basis: auto;
+    margin-right: auto;
+  }
+}
+
+.mute {
+  min-width: 64px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font: 600 11px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+@media (min-width: 880px) {
+  .mute {
+    margin-top: 6px;
+  }
+}
+
+.mute[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--panel);
+}
+
+.track-scope {
+  grid-area: scope;
+  display: block;
+  width: 100%;
+  height: 40px;
+  border-radius: 6px;
+  background: var(--inset);
+}
+
+.track-grid {
+  grid-area: grid;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.track-params {
+  grid-area: params;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+@media (min-width: 880px) {
+  .track-params {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.track-params li {
+  display: grid;
+  grid-template-columns: 2.1rem minmax(0, 1fr) 1.6rem;
+  align-items: center;
+  gap: 6px;
+}
+
+.param-name,
+.param-value {
+  font: 500 10px var(--font-mono);
+  color: var(--muted);
+}
+
+.param-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.track-params .meter {
+  height: 6px;
+  overflow: visible;
+}
+
+.track-params .meter > span {
+  background: var(--accent);
+}
+
+/* The genome's base value; the bar is where modulation has moved it. */
+.meter-base {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+}
+
+/* Modulation matrix */
+.matrix {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 0 24px;
+}
+
+.mod-group {
+  grid-column: 1 / -1;
+  margin: 12px 0 4px;
+  font: 600 10px/1.2 var(--font-body);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mod-group:first-child {
+  margin-top: 0;
+}
+
+.mod-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem 3rem;
+  grid-template-areas:
+    'src bar amount'
+    'dest bar amount';
+  gap: 0 10px;
+  align-items: center;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+.mod-src {
+  grid-area: src;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mod-dest {
+  grid-area: dest;
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mod-bar {
+  grid-area: bar;
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--inset);
+}
+
+/* Center line: left of it pulls down, right of it pushes up. */
+.mod-bar::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--muted);
+}
+
+.mod-extent,
+.mod-value {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 5px;
+}
+
+.mod-extent {
+  background: var(--line);
+}
+
+.mod-value {
+  background: var(--accent);
+  left: 50%;
+  width: 0;
+}
+
+.mod-amount {
+  grid-area: amount;
+  font: 500 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

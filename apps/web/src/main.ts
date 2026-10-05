@@ -4,6 +4,7 @@ import {
   SensorRecorder,
   getStyle,
   parseRecording,
+  type EngineView,
   type Router,
   type Style,
 } from '@sensinth/core';
@@ -24,9 +25,11 @@ import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
 import { LabView } from './ui/lab';
+import { MatrixView } from './ui/matrix';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
 import { SourcesView } from './ui/sources';
+import { TracksView } from './ui/tracks';
 
 loadFonts();
 
@@ -210,22 +213,37 @@ function download(name: string, text: string): void {
 const playBtn = $<HTMLButtonElement>('play');
 const hint = $('hint');
 
+/** No sensor, no music: Play needs at least one source switched on. */
+function anySourceOn(): boolean {
+  return sources.sources.some((s) => sources.isOn(s.id));
+}
+
 function renderTransport(): void {
   const playing = player.playing;
+  const canPlay = playing || anySourceOn();
   playBtn.setAttribute('aria-pressed', String(playing));
   playBtn.setAttribute('aria-label', playing ? 'Stop' : 'Play');
+  playBtn.disabled = !canPlay;
   const channels = player.hub.list();
-  if (!playing) hint.textContent = 'You set tempo and style. The sensors write the rest.';
-  else if (channels.length === 0)
-    hint.textContent = 'No sensors on: the dials rest at their defaults.';
+  if (!canPlay) hint.textContent = 'Turn on at least one sensor source. No sensor, no music.';
+  else if (!playing) hint.textContent = 'You set tempo and style. The sensors write the rest.';
+  else if (player.view()?.snapshot.waiting ?? true)
+    hint.textContent = 'Waiting for a sensor… the music starts on the next bar after one sends.';
   else if (channels.some((c) => c.desc.source === 'phone'))
-    hint.textContent = 'Shake, tilt, clap or cover the camera. The music follows.';
-  else hint.textContent = 'Playing. Watch the dials follow the sensors.';
+    hint.textContent = 'Shake, tilt, clap or point the camera somewhere else. The music follows.';
+  else hint.textContent = 'Playing. Every track below is written by the sensors.';
 }
+
+// Play becomes available as soon as a source is switched on.
+sources.onChange = () => {
+  sourcesView.render();
+  renderTransport();
+};
 
 playBtn.addEventListener('click', async () => {
   if (player.playing) player.stop();
   else {
+    if (!anySourceOn()) return;
     try {
       await player.start();
     } catch (err) {
@@ -285,6 +303,47 @@ const sensorsView = new SensorsView($('sensors'), $('sensors-empty'));
 const nowKey = $('now-key');
 const nowChord = $('now-chord');
 const nowPos = $('now-pos');
+const tracksView = new TracksView($('tracks'), $('tracks-empty'), {
+  analyser: (slot) => player.trackAnalyser(slot),
+  isMuted: (slot) => player.isMuted(slot),
+  setMuted: (slot, muted) => player.setMuted(slot, muted),
+});
+const channelLabel = (id: string) => player.hub.get(id)?.desc.label ?? id;
+const matrixView = new MatrixView($('matrix'), $('matrix-empty'), channelLabel);
+const genome = {
+  section: $('g-section'),
+  hash: $('g-hash'),
+  key: $('g-key'),
+  change: $('g-change'),
+};
+const KEY_SOURCE = {
+  place: 'from the place',
+  sensors: 'from the sensors',
+  colour: 'moved by colour',
+};
+const REBUILD = {
+  start: 'start',
+  section: 'new section',
+  scene: 'new scene',
+  style: 'new style',
+  resume: 'sensors back',
+};
+
+function renderGenome(view: EngineView | undefined): void {
+  const snap = view?.snapshot;
+  if (!view || !snap || snap.waiting) {
+    for (const el of Object.values(genome)) el.textContent = '–';
+    return;
+  }
+  genome.section.textContent = `${snap.section + 1} · phrase ${snap.phrase + 1}`;
+  genome.hash.textContent = `#${snap.genome}`;
+  genome.key.textContent = `${snap.keyName}, ${KEY_SOURCE[view.keySource]}`;
+  const r = view.rebuild;
+  genome.change.textContent = `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
+}
+
+let lastTracks = 0;
+let lastWaiting: boolean | undefined;
 
 let shownVersion = -1;
 let shownRouter: Router | undefined;
@@ -319,10 +378,24 @@ function frame(t: number): void {
     dials.update(player.router.macros);
     renderRecorder();
 
-    const snap = player.snapshot();
-    nowKey.textContent = snap ? snap.keyName : 'Stopped';
-    nowChord.textContent = snap ? `${snap.chordRoman} · ${snap.chordName}` : '–';
-    nowPos.textContent = snap ? `${snap.bar + 1}.${snap.beat + 1}` : '–';
+    const view = player.view();
+    const snap = view?.snapshot;
+    const live = snap && !snap.waiting;
+    nowKey.textContent = !snap ? 'Stopped' : live ? snap.keyName : 'Waiting';
+    nowChord.textContent = live ? `${snap.chordRoman} · ${snap.chordName}` : '–';
+    nowPos.textContent = live ? `${snap.bar + 1}.${snap.beat + 1}` : '–';
+    renderGenome(view);
+    matrixView.update(view);
+    if (snap?.waiting !== lastWaiting) {
+      lastWaiting = snap?.waiting;
+      renderTransport();
+    }
+  }
+
+  // Track grids and scopes: about 30 times a second, only in Play mode.
+  if (t - lastTracks > 33 && !$('tracks').closest('[hidden]')) {
+    lastTracks = t;
+    tracksView.update(player.view(), true);
   }
   requestAnimationFrame(frame);
 }

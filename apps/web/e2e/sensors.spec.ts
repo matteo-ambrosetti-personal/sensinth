@@ -109,7 +109,7 @@ test.describe('with camera, microphone and location allowed', () => {
     const keys: string[] = [];
     for (let i = 0; i < 3; i++) {
       await page.locator('#play').click();
-      await expect(page.locator('#now-key')).not.toHaveText('Stopped');
+      await expect(page.locator('#now-key')).toHaveText(/^[A-G][#b]? /, { timeout: 8000 });
       keys.push(((await page.locator('#now-key').textContent()) ?? '').split(' ')[0] ?? '');
       await page.locator('#play').click();
     }

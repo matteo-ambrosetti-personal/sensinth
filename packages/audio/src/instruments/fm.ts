@@ -1,5 +1,6 @@
-import { midiToFreq, type Macros, type NoteEvent, type Patch } from '@sensinth/core';
+import { midiToFreq, type NoteEvent, type Patch, type TrackParams } from '@sensinth/core';
 import { applyEnvelope } from '../envelope';
+import { shapeEnvelope } from '../params';
 import type { Instrument } from './types';
 import { addVibrato, connectDetune, VoiceLimiter } from './voice';
 
@@ -22,18 +23,18 @@ export class FmInstrument implements Instrument {
     this.output = ctx.createGain();
   }
 
-  play(ev: NoteEvent, time: number, duration: number, macros: Readonly<Macros>): void {
+  play(ev: NoteEvent, time: number, duration: number, params: Readonly<TrackParams>): void {
     if (ev.midi === undefined) return;
     const { ctx, patch } = this;
     const gate = Math.max(0.01, duration * (patch.gate ?? 1));
     const vca = ctx.createGain();
     vca.gain.value = 0;
     vca.connect(this.output);
-    const end = applyEnvelope(vca.gain, time, gate, patch.env, ev.vel);
+    const end = applyEnvelope(vca.gain, time, gate, shapeEnvelope(patch.env, params), ev.vel);
 
     const freq = midiToFreq(ev.midi);
     const modFreq = freq * patch.ratio;
-    const brightness = (0.5 + macros.texture) * (0.6 + 0.4 * ev.vel);
+    const brightness = (0.25 + 1.5 * params.timbre) * (0.6 + 0.4 * ev.vel);
     const carrier = ctx.createOscillator();
     const modulator = ctx.createOscillator();
     const depth = ctx.createGain();
