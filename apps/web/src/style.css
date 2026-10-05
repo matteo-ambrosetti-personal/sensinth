@@ -201,13 +201,14 @@ h2 {
   background: var(--inset);
 }
 
+/* Play sits in the scope's bottom-right corner, so the trace runs unbroken. */
 .play {
+  --play-size: 56px;
   position: absolute;
-  left: 50%;
-  top: 84px;
-  translate: -50% -50%;
-  width: 84px;
-  height: 84px;
+  right: 12px;
+  top: calc(168px - 12px - var(--play-size));
+  width: var(--play-size);
+  height: var(--play-size);
   border-radius: 50%;
   border: none;
   background: var(--accent);
@@ -226,10 +227,21 @@ h2 {
 }
 
 .play svg {
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
   fill: currentColor;
   grid-area: 1 / 1;
+}
+
+@media (min-width: 880px) {
+  .play {
+    --play-size: 64px;
+  }
+
+  .play svg {
+    width: 30px;
+    height: 30px;
+  }
 }
 
 .play .icon-stop,
