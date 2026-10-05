@@ -2,20 +2,20 @@ import { midiToFreq, type Macros, type NoteEvent, type Patch } from '@sensinth/c
 import { applyEnvelope } from '../envelope';
 import type { WaveTable } from '../waves';
 import type { Instrument } from './types';
+import { addVibrato, connectDetune, VoiceLimiter } from './voice';
 
 type TonalPatch = Extract<Patch, { type: 'pulse' | 'osc' }>;
-
-const MAX_VOICES = 8;
 
 /** Pulse and basic-oscillator voices with ADSR, optional detune and delayed vibrato. */
 export class TonalInstrument implements Instrument {
   readonly output: GainNode;
-  private voices: { gain: GainNode; end: number }[] = [];
+  private readonly limiter = new VoiceLimiter();
 
   constructor(
     private readonly ctx: BaseAudioContext,
     private readonly patch: TonalPatch,
     private readonly waves: WaveTable,
+    private readonly detuneMod?: AudioNode,
   ) {
     this.output = ctx.createGain();
   }
@@ -30,9 +30,9 @@ export class TonalInstrument implements Instrument {
     const end = applyEnvelope(vca.gain, time, gate, patch.env, ev.vel);
 
     const detune = patch.type === 'osc' ? (patch.detune ?? 0) : 0;
-    const oscs = detune > 0 ? [-detune / 2, detune / 2] : [0];
+    const spread = detune > 0 ? [-detune / 2, detune / 2] : [0];
     const freq = midiToFreq(ev.midi);
-    for (const cents of oscs) {
+    for (const cents of spread) {
       const osc = ctx.createOscillator();
       if (patch.type === 'pulse') {
         const duties = patch.duty;
@@ -43,31 +43,12 @@ export class TonalInstrument implements Instrument {
       }
       osc.frequency.setValueAtTime(freq, time);
       osc.detune.setValueAtTime(cents, time);
-      if (patch.vibrato && gate > patch.vibrato.delay) {
-        const lfo = ctx.createOscillator();
-        const depth = ctx.createGain();
-        lfo.frequency.value = patch.vibrato.rate;
-        depth.gain.setValueAtTime(0, time);
-        depth.gain.setValueAtTime(0, time + patch.vibrato.delay);
-        depth.gain.linearRampToValueAtTime(patch.vibrato.depth, time + patch.vibrato.delay + 0.2);
-        lfo.connect(depth).connect(osc.detune);
-        lfo.start(time);
-        lfo.stop(end);
-      }
+      addVibrato(ctx, osc, patch.vibrato, time, gate, end);
+      connectDetune(osc, this.detuneMod);
       osc.connect(vca);
       osc.start(time);
       osc.stop(end);
     }
-    this.track(vca, time, end);
-  }
-
-  /** Caps polyphony by quickly fading the oldest voice still sounding. */
-  private track(gain: GainNode, time: number, end: number): void {
-    this.voices = this.voices.filter((v) => v.end > time);
-    this.voices.push({ gain, end });
-    if (this.voices.length > MAX_VOICES) {
-      const oldest = this.voices.shift();
-      oldest?.gain.gain.setTargetAtTime(0, time, 0.005);
-    }
+    this.limiter.track(vca, time, end);
   }
 }

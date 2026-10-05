@@ -4,6 +4,7 @@ import type { Part } from '../context';
 import { ArpPart } from './arp';
 import { BassPart } from './bass';
 import { ChordsPart } from './chords';
+import { DronePart } from './drone';
 import { DrumsPart } from './drums';
 import { MelodyPart } from './melody';
 
@@ -19,5 +20,7 @@ export function createPart(cfg: PartConfig, rng: Rng): Part {
       return new ArpPart(cfg, rng);
     case 'chords':
       return new ChordsPart(cfg);
+    case 'drone':
+      return new DronePart(cfg);
   }
 }

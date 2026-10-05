@@ -79,3 +79,36 @@ describe('Router', () => {
     expect(router.update(0.05).triggers.accent).toBe(0);
   });
 });
+
+describe('Router solo', () => {
+  it('lets one channel drive the music alone', () => {
+    const hub = new SensorHub();
+    hub.announce({ id: 'light', kind: 'light', label: 'Light', range: [0, 1] });
+    hub.announce({ id: 'acc', kind: 'motion.accel', label: 'Shake', minSpan: 3 });
+    const router = new Router(hub);
+    feed(hub, 'light', () => 1, 3);
+    feed(hub, 'acc', (t) => 8 * Math.abs(Math.sin(t * 9)), 3);
+    router.setSolo('acc');
+    expect(router.solo).toBe('acc');
+    for (let i = 0; i < 400; i++) router.update(0.05);
+    expect(router.macros.brightness).toBeCloseTo(MACRO_INFO.brightness.fallback, 2);
+    router.setSolo(undefined);
+    for (let i = 0; i < 400; i++) router.update(0.05);
+    expect(router.macros.brightness).toBeGreaterThan(0.9);
+  });
+});
+
+describe('channel debug signals', () => {
+  it('exposes the normalized value and the learned range', () => {
+    const hub = new SensorHub();
+    hub.announce({ id: 'p', kind: 'pressure', label: 'Pressure', minSpan: 2 });
+    feed(hub, 'p', (t) => 1010 + 5 * Math.sin(t), 10);
+    const ch = hub.get('p')!;
+    expect(ch.debug.normalized).toBeGreaterThanOrEqual(0);
+    expect(ch.debug.normalized).toBeLessThanOrEqual(1);
+    const [lo, hi] = ch.debug.bounds!;
+    expect(lo).toBeLessThanOrEqual(ch.raw);
+    expect(hi).toBeGreaterThanOrEqual(ch.raw);
+    expect(hi - lo).toBeGreaterThanOrEqual(2);
+  });
+});

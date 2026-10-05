@@ -133,7 +133,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 78,
     "part": "arp",
     "step": 14,
-    "vel": 0.5620376139691804,
+    "vel": 0.5620376139691805,
   },
   {
     "durSteps": 1,
@@ -175,7 +175,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 78,
     "part": "lead",
     "step": 16,
-    "vel": 0.894334393300627,
+    "vel": 0.8943343933006271,
   },
   {
     "durSteps": 1.8,
@@ -217,27 +217,27 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 78,
     "part": "arp",
     "step": 22,
-    "vel": 0.5602604154318618,
+    "vel": 0.5602604154318619,
   },
   {
     "durSteps": 1,
     "part": "drums",
     "step": 24,
-    "vel": 0.5993708149046095,
+    "vel": 0.5993708149046096,
     "voice": "kick",
   },
   {
     "durSteps": 1,
     "part": "drums",
     "step": 24,
-    "vel": 0.5993708149046095,
+    "vel": 0.5993708149046096,
     "voice": "snare",
   },
   {
     "durSteps": 1,
     "part": "drums",
     "step": 24,
-    "vel": 0.5993708149046095,
+    "vel": 0.5993708149046096,
     "voice": "hat",
   },
   {
@@ -252,7 +252,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 66,
     "part": "arp",
     "step": 24,
-    "vel": 0.7065436332424853,
+    "vel": 0.7065436332424854,
   },
   {
     "durSteps": 1.8,
@@ -265,7 +265,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "durSteps": 1,
     "part": "drums",
     "step": 28,
-    "vel": 0.5921434894313642,
+    "vel": 0.5921434894313643,
     "voice": "hat",
   },
   {
@@ -336,7 +336,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 73,
     "part": "arp",
     "step": 36,
-    "vel": 0.6908587116616772,
+    "vel": 0.6908587116616773,
   },
   {
     "durSteps": 6,
@@ -419,14 +419,14 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "durSteps": 1,
     "part": "drums",
     "step": 48,
-    "vel": 0.5759758041423335,
+    "vel": 0.5759758041423336,
     "voice": "kick",
   },
   {
     "durSteps": 1,
     "part": "drums",
     "step": 48,
-    "vel": 0.5759758041423335,
+    "vel": 0.5759758041423336,
     "voice": "hat",
   },
   {
@@ -469,7 +469,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 70,
     "part": "arp",
     "step": 52,
-    "vel": 0.6833766770623743,
+    "vel": 0.6833766770623744,
   },
   {
     "durSteps": 4,
@@ -483,7 +483,7 @@ exports[`Engine > matches the recorded output for a fixed seed 1`] = `
     "midi": 75,
     "part": "arp",
     "step": 54,
-    "vel": 0.5328285697205807,
+    "vel": 0.5328285697205808,
   },
   {
     "durSteps": 1,

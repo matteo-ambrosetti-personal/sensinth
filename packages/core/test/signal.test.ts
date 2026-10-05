@@ -33,6 +33,15 @@ describe('AdaptiveNormalizer', () => {
     expect(n.update(-200, 0.1)).toBe(0);
   });
 
+  it('keeps a resting magnitude near zero when the physical range starts at zero', () => {
+    const n = new AdaptiveNormalizer({ range: [0, 40], adaptive: true, minSpan: 3 });
+    let y = 1;
+    for (let i = 0; i < 2000; i++) y = n.update(0.05 + 0.02 * Math.sin(i), 0.03);
+    expect(y).toBeLessThan(0.05);
+    expect(n.bounds?.[0]).toBeGreaterThanOrEqual(0);
+    expect(n.bounds?.[0]).toBeLessThan(0.1);
+  });
+
   it('learns an unknown range', () => {
     const n = new AdaptiveNormalizer();
     for (let i = 0; i < 200; i++) n.update(1000 + 200 * Math.sin(i / 10), 0.05);

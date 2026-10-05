@@ -1,9 +1,11 @@
 export { applyEnvelope } from './envelope';
 export { createImpulse, createSoftClipCurve } from './fx/reverb';
-export { ChipDrums } from './instruments/chipDrums';
+export { CHIP_KIT, DrumKit, LOFI_KIT, type DrumKitDefinition } from './instruments/drums';
+export { FmInstrument } from './instruments/fm';
+export { PadInstrument } from './instruments/pad';
 export { TonalInstrument } from './instruments/tonal';
 export type { Instrument } from './instruments/types';
-export { createNoiseBuffer } from './noise';
+export { createCrackleBuffer, createNoiseBuffer } from './noise';
 export { analyze, encodeWav, renderOffline } from './offline';
 export type { OfflineRenderOptions, RenderStats } from './offline';
 export { Renderer } from './renderer';

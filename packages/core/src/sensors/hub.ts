@@ -14,6 +14,13 @@ export interface ChannelState {
   stale: boolean;
   /** Timestamp of the latest onset, seconds. */
   lastOnsetT: number;
+  /** Intermediate signals, for inspecting how a channel is processed. */
+  debug: {
+    /** Normalized value before smoothing, 0..1. */
+    normalized: number;
+    /** Raw-unit range currently mapped onto 0..1. */
+    bounds: [number, number] | undefined;
+  };
 }
 
 export interface OnsetEvent {
@@ -64,6 +71,7 @@ export class SensorHub {
         lastT: -Infinity,
         stale: true,
         lastOnsetT: -Infinity,
+        debug: { normalized: 0.5, bounds: undefined },
       },
       fx: new FeatureExtractor(desc, timescale),
     });
@@ -85,6 +93,7 @@ export class SensorHub {
     if (sample.t < state.lastT) return;
     const dt = Number.isFinite(state.lastT) ? sample.t - state.lastT : 0;
     state.features = ch.fx.update(sample.v, dt);
+    state.debug = { normalized: ch.fx.normalized, bounds: ch.fx.bounds };
     state.raw = sample.v;
     state.lastT = sample.t;
     state.stale = false;

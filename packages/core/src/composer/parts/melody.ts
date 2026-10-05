@@ -4,6 +4,7 @@ import { clamp, lerp } from '../../math';
 import type { Rng } from '../../random';
 import { chordDegrees, nearestChordTone } from '../../theory/chords';
 import { foldIntoRange } from '../../theory/notes';
+import { pentatonicDegrees } from '../../theory/scales';
 import type { MelodyPartConfig } from '../../styles/schema';
 import type { ComposerContext, Part } from '../context';
 
@@ -80,7 +81,9 @@ export class MelodyPart implements Part {
   private realize(note: MotifNote, ctx: ComposerContext): number {
     const [lo, hi] = this.cfg.range;
     const { scale, chord, stepInBar, macros } = ctx;
-    let midi = foldIntoRange(scale.degreeToMidi(this.anchor + note.deg), lo, hi);
+    let degree = this.anchor + note.deg;
+    if (this.cfg.pentatonic) degree = snapToDegrees(degree, pentatonicDegrees(scale.mode));
+    let midi = foldIntoRange(scale.degreeToMidi(degree), lo, hi);
 
     if (note.cadence) {
       const [rootDeg] = chordDegrees(chord) as [number];
@@ -190,6 +193,15 @@ export class MelodyPart implements Part {
     const hiDeg = ctx.scale.degreeOf(hi) - 5;
     return Math.round(lerp(loDeg, Math.max(loDeg, hiDeg), ctx.macros.register));
   }
+}
+
+/** Moves an absolute degree to the nearest one whose scale position is allowed (ties go down). */
+function snapToDegrees(degree: number, allowed: readonly number[]): number {
+  for (let d = 0; d < 7; d++) {
+    if (allowed.includes((((degree - d) % 7) + 7) % 7)) return degree - d;
+    if (allowed.includes((((degree + d) % 7) + 7) % 7)) return degree + d;
+  }
+  return degree;
 }
 
 /** The note with `target`'s pitch class closest to `near`, inside [lo, hi]. */

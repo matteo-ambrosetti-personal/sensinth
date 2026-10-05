@@ -51,6 +51,7 @@ export class Router {
   private triggerRoutes: TriggerRoute[] = [];
   private builtFor = -1;
   private ranges: Partial<Record<MacroId, [number, number]>> = {};
+  private soloId: string | undefined;
 
   constructor(
     private readonly hub: SensorHub,
@@ -60,6 +61,18 @@ export class Router {
   setRules(rules: MappingRules): void {
     this.rules = rules;
     this.builtFor = -1;
+  }
+
+  /**
+   * Lets a single channel drive the music on its own (others are ignored),
+   * to hear what one sensor does. `undefined` turns solo off.
+   */
+  setSolo(channelId: string | undefined): void {
+    this.soloId = channelId;
+  }
+
+  get solo(): string | undefined {
+    return this.soloId;
   }
 
   /** Per-macro output range (from the style); targets are scaled into it. */
@@ -83,6 +96,7 @@ export class Router {
       weight[id] = 0;
     }
     for (const r of this.routes) {
+      if (this.soloId !== undefined && r.channelId !== this.soloId) continue;
       const ch = this.hub.get(r.channelId);
       if (!ch || ch.stale) continue;
       let v = featureValue(ch.features, r.feature);
@@ -100,6 +114,7 @@ export class Router {
 
     const triggers = noTriggers();
     for (const onset of this.hub.consumeOnsets()) {
+      if (this.soloId !== undefined && onset.id !== this.soloId) continue;
       for (const r of this.triggerRoutes) {
         if (r.channelId === onset.id && onset.strength >= r.minStrength) {
           triggers[r.trigger] = Math.max(triggers[r.trigger], onset.strength);

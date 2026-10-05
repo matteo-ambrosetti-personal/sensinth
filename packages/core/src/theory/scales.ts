@@ -23,6 +23,25 @@ export const MODE_LADDER: readonly ModeId[] = [
   'lydian',
 ];
 
+/**
+ * Scale-degree indices (0..6) of a mode's pentatonic subset: the mode minus
+ * its tritone pair, which removes the semitone clashes. The tonic is never
+ * dropped (in Lydian only the raised fourth goes).
+ */
+export function pentatonicDegrees(mode: ModeId): number[] {
+  const iv = MODES[mode].intervals;
+  const drop = new Set<number>();
+  for (let i = 0; i < 7; i++) {
+    for (let j = i + 1; j < 7; j++) {
+      if ((iv[j] as number) - (iv[i] as number) === 6) {
+        if (i !== 0) drop.add(i);
+        drop.add(j);
+      }
+    }
+  }
+  return [0, 1, 2, 3, 4, 5, 6].filter((d) => !drop.has(d));
+}
+
 /** Sorts a style's modes from darkest to brightest. */
 export function byBrightness(modes: readonly ModeId[]): ModeId[] {
   return [...modes].sort((a, b) => MODE_LADDER.indexOf(a) - MODE_LADDER.indexOf(b));

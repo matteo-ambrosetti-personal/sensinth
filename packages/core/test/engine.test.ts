@@ -5,6 +5,7 @@ import {
   STEPS_PER_BAR,
   SimulatedSource,
   STYLES,
+  ambient,
   chiptune,
   isChordTone,
   stepDuration,
@@ -71,14 +72,17 @@ describe('Engine', () => {
         expect(strong.filter((p) => !p.chordTone)).toEqual([]);
       });
 
-      it('plays the chord root on the bass downbeat', () => {
-        const bassIds = style.parts.filter((p) => p.role === 'bass').map((p) => p.id);
-        const downbeats = played.filter(
-          (p) => bassIds.includes(p.ev.part) && p.ev.step % STEPS_PER_BAR === 0,
-        );
-        expect(downbeats.length).toBeGreaterThan(0);
-        expect(downbeats.filter((p) => !p.chordTone)).toEqual([]);
-      });
+      it.runIf(style.parts.some((p) => p.role === 'bass'))(
+        'plays a chord tone on the bass downbeat',
+        () => {
+          const bassIds = style.parts.filter((p) => p.role === 'bass').map((p) => p.id);
+          const downbeats = played.filter(
+            (p) => bassIds.includes(p.ev.part) && p.ev.step % STEPS_PER_BAR === 0,
+          );
+          expect(downbeats.length).toBeGreaterThan(0);
+          expect(downbeats.filter((p) => !p.chordTone)).toEqual([]);
+        },
+      );
 
       it('emits well-formed events inside each part range', () => {
         const ranges = new Map(
@@ -166,5 +170,23 @@ describe('Engine', () => {
     expect(snap.keyName).toMatch(/^A /);
     expect(snap.chordRoman).toMatch(/^(i|I)/);
     expect(snap.bar).toBe(0);
+  });
+});
+
+describe('Ambient drone', () => {
+  it('holds the tonic and fifth of the current key', () => {
+    const engine = new Engine({ style: ambient, seed: 4 });
+    const dt = stepDuration(ambient.defaultTempo);
+    let drones = 0;
+    for (let step = 0; step < 64 * STEPS_PER_BAR; step++) {
+      for (const ev of engine.tick(dt)) {
+        if (ev.part !== 'drone') continue;
+        drones++;
+        const rel = ((((ev.midi as number) - engine.scale.root) % 12) + 12) % 12;
+        expect([0, 7]).toContain(rel);
+        expect(ev.durSteps).toBeGreaterThanOrEqual(STEPS_PER_BAR);
+      }
+    }
+    expect(drones).toBeGreaterThanOrEqual(16);
   });
 });

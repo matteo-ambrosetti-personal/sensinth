@@ -49,12 +49,19 @@ export const DEFAULT_MAPPING: MappingRules = {
     { kind: 'humidity', feature: 'level', macro: 'space' },
     { kind: 'geo.altitude', feature: 'level', macro: 'space', weight: 0.3 },
     { kind: 'battery', feature: 'level', macro: 'texture', invert: true, weight: 0.2 },
+    // Laptops: the pointer and keyboard stand in for motion and tilt.
+    { kind: 'pointer.speed', feature: 'level', macro: 'energy' },
+    { kind: 'pointer.y', feature: 'level', macro: 'register' },
+    { kind: 'pointer.x', feature: 'level', macro: 'texture' },
+    { kind: 'keys.rate', feature: 'activity', macro: 'variation' },
   ],
   triggers: [
     { kind: 'motion.accel', trigger: 'accent' },
     { kind: 'motion.accel', trigger: 'fill', minStrength: 0.7 },
     { kind: 'sound.level', trigger: 'accent' },
     { kind: 'camera.motion', trigger: 'fill', minStrength: 0.4 },
+    { kind: 'keys.rate', trigger: 'accent' },
+    { kind: 'pointer.speed', trigger: 'fill', minStrength: 0.8 },
   ],
 };
 

@@ -1,4 +1,5 @@
 import {
+  Rng,
   expLerp,
   lerp,
   stepDuration,
@@ -6,13 +7,16 @@ import {
   defaultMacros,
   type Macros,
   type NoteEvent,
+  type Patch,
   type Style,
 } from '@sensinth/core';
 import { createImpulse, createSoftClipCurve } from './fx/reverb';
-import { ChipDrums } from './instruments/chipDrums';
+import { CHIP_KIT, DrumKit, LOFI_KIT } from './instruments/drums';
+import { FmInstrument } from './instruments/fm';
+import { PadInstrument } from './instruments/pad';
 import { TonalInstrument } from './instruments/tonal';
 import type { Instrument } from './instruments/types';
-import { createNoiseBuffer } from './noise';
+import { createCrackleBuffer, createNoiseBuffer } from './noise';
 import { WaveTable } from './waves';
 
 interface PartChain {
@@ -22,6 +26,11 @@ interface PartChain {
 }
 
 const MASTER_GAIN = 0.75;
+const DEFAULT_REVERB_SECONDS = 2.4;
+
+function isDrums(patch: Patch): boolean {
+  return patch.type === 'chipDrums' || patch.type === 'lofiDrums';
+}
 
 /**
  * Turns composer note events into sound. Owns the mix: per-part gain and
@@ -41,6 +50,14 @@ export class Renderer {
   private readonly delaySend: GainNode;
   private readonly delay: DelayNode;
   private readonly filter: BiquadFilterNode;
+  private convolver: ConvolverNode;
+  private reverbSeconds = DEFAULT_REVERB_SECONDS;
+  /** Tape wobble: slow drift plus faster flutter, summed into every tonal voice's detune. */
+  private readonly wobble: GainNode;
+  private readonly wobbleDrift: GainNode;
+  private readonly wobbleFlutter: GainNode;
+  private readonly crackle: GainNode;
+  private readonly jitter = new Rng(17);
   readonly output: GainNode;
 
   constructor(
@@ -72,9 +89,9 @@ export class Renderer {
 
     // Reverb send.
     this.reverbSend = ctx.createGain();
-    const convolver = ctx.createConvolver();
-    convolver.buffer = createImpulse(ctx);
-    this.reverbSend.connect(convolver).connect(this.dryBus);
+    this.convolver = ctx.createConvolver();
+    this.convolver.buffer = createImpulse(ctx, this.reverbSeconds);
+    this.reverbSend.connect(this.convolver).connect(this.dryBus);
 
     // Tempo-synced feedback delay, darkened on every repeat.
     this.delaySend = ctx.createGain();
@@ -88,6 +105,33 @@ export class Renderer {
     this.delay.connect(damp).connect(feedback).connect(this.delay);
     damp.connect(this.dryBus);
 
+    // Tape wobble LFOs (depth set per style in `update`).
+    this.wobble = ctx.createGain();
+    this.wobbleDrift = ctx.createGain();
+    this.wobbleFlutter = ctx.createGain();
+    this.wobbleDrift.gain.value = 0;
+    this.wobbleFlutter.gain.value = 0;
+    const drift = ctx.createOscillator();
+    drift.frequency.value = 0.55;
+    const flutter = ctx.createOscillator();
+    flutter.frequency.value = 3.3;
+    drift.connect(this.wobbleDrift).connect(this.wobble);
+    flutter.connect(this.wobbleFlutter).connect(this.wobble);
+    drift.start();
+    flutter.start();
+
+    // Vinyl crackle bed.
+    this.crackle = ctx.createGain();
+    this.crackle.gain.value = 0;
+    const crackleSrc = ctx.createBufferSource();
+    crackleSrc.buffer = createCrackleBuffer(ctx);
+    crackleSrc.loop = true;
+    const crackleHp = ctx.createBiquadFilter();
+    crackleHp.type = 'highpass';
+    crackleHp.frequency.value = 900;
+    crackleSrc.connect(crackleHp).connect(this.crackle).connect(this.dryBus);
+    crackleSrc.start();
+
     this.loadStyle(style);
     this.setTempo(style.defaultTempo);
     this.update(this.macros, ctx.currentTime);
@@ -98,13 +142,11 @@ export class Renderer {
     const old = this.parts;
     this.style = style;
     this.parts = new Map();
+    this.setReverbLength(style.fx.reverbSeconds ?? DEFAULT_REVERB_SECONDS);
     for (const part of style.parts) {
       const patch = style.instruments[part.instrument];
       if (!patch) continue;
-      const instrument =
-        patch.type === 'chipDrums'
-          ? new ChipDrums(this.ctx, this.noise)
-          : new TonalInstrument(this.ctx, patch, this.waves);
+      const instrument = this.createInstrument(patch);
       const gain = this.ctx.createGain();
       gain.gain.value = patch.gain;
       const pan = this.ctx.createStereoPanner();
@@ -112,7 +154,7 @@ export class Renderer {
       instrument.output.connect(gain).connect(pan);
       pan.connect(this.dryBus);
       pan.connect(this.reverbSend);
-      if (patch.type !== 'chipDrums') pan.connect(this.delaySend);
+      if (!isDrums(patch)) pan.connect(this.delaySend);
       this.parts.set(part.id, { instrument, gain, pan });
     }
     if (old.size > 0) {
@@ -122,6 +164,36 @@ export class Renderer {
         setTimeout(() => old.forEach((c) => c.pan.disconnect()), 4000);
       }
     }
+  }
+
+  private createInstrument(patch: Patch): Instrument {
+    switch (patch.type) {
+      case 'pulse':
+      case 'osc':
+        return new TonalInstrument(this.ctx, patch, this.waves, this.wobble);
+      case 'fm':
+        return new FmInstrument(this.ctx, patch, this.wobble);
+      case 'pad':
+        return new PadInstrument(this.ctx, patch, this.wobble);
+      case 'chipDrums':
+        return new DrumKit(this.ctx, this.noise, CHIP_KIT);
+      case 'lofiDrums':
+        return new DrumKit(this.ctx, this.noise, LOFI_KIT);
+    }
+  }
+
+  /** Swaps in a new impulse response when a style wants a longer or shorter tail. */
+  private setReverbLength(seconds: number): void {
+    if (seconds === this.reverbSeconds) return;
+    this.reverbSeconds = seconds;
+    const next = this.ctx.createConvolver();
+    next.buffer = createImpulse(this.ctx, seconds);
+    this.reverbSend.connect(next).connect(this.dryBus);
+    const old = this.convolver;
+    this.reverbSend.disconnect(old);
+    this.convolver = next;
+    // Let the old tail ring out before dropping it.
+    if ('close' in this.ctx) setTimeout(() => old.disconnect(), seconds * 1000);
   }
 
   setTempo(bpm: number): void {
@@ -146,6 +218,11 @@ export class Renderer {
     );
     this.reverbSend.gain.setTargetAtTime(lerp(fx.reverb[0], fx.reverb[1], macros.space), t, 0.3);
     this.delaySend.gain.setTargetAtTime(lerp(fx.delay[0], fx.delay[1], macros.space), t, 0.3);
+    const wobble = fx.wobble ? lerp(fx.wobble[0], fx.wobble[1], macros.texture) : 0;
+    this.wobbleDrift.gain.setTargetAtTime(wobble, t, 0.5);
+    this.wobbleFlutter.gain.setTargetAtTime(wobble * 0.15, t, 0.5);
+    const crackle = fx.crackle ? lerp(fx.crackle[0], fx.crackle[1], macros.variation) : 0;
+    this.crackle.gain.setTargetAtTime(crackle, t, 0.5);
   }
 
   /**
@@ -156,8 +233,15 @@ export class Renderer {
     for (const ev of events) {
       const chain = this.parts.get(ev.part);
       if (!chain) continue;
-      const time = gridTime + swingOffset(ev.step, this.style.swing, stepSeconds);
-      chain.instrument.play(ev, time, ev.durSteps * stepSeconds, this.macros);
+      let time = gridTime + swingOffset(ev.step, this.style.swing, stepSeconds);
+      const humanize = this.style.fx.humanize ?? 0;
+      if (humanize > 0) time += ((this.jitter.next() * 2 - 1) * humanize) / 1000;
+      chain.instrument.play(
+        ev,
+        Math.max(time, this.ctx.currentTime),
+        ev.durSteps * stepSeconds,
+        this.macros,
+      );
     }
   }
 

@@ -50,7 +50,44 @@ export type Patch =
       vibrato?: Vibrato;
     }
   | {
+      /** Two-operator FM: electric-piano keys, bells, soft leads. */
+      type: 'fm';
+      gain: number;
+      pan?: number;
+      /** Modulator frequency as a multiple of the note frequency. */
+      ratio: number;
+      /** Modulation index at the attack and after `indexDecay`; `texture` scales both. */
+      index: [number, number];
+      /** Seconds for the index to settle (the "ping" of the attack). */
+      indexDecay: number;
+      env: Envelope;
+      gate?: number;
+      vibrato?: Vibrato;
+    }
+  | {
+      /** Several detuned oscillators through a low-pass that opens with the note. */
+      type: 'pad';
+      wave: 'sine' | 'triangle' | 'sawtooth' | 'square';
+      gain: number;
+      pan?: number;
+      /** Oscillators per note. */
+      voices: number;
+      /** Total detune spread in cents. */
+      detune: number;
+      /** Filter cutoff in Hz at brightness = 0 and brightness = 1. */
+      cutoff: [number, number];
+      env: Envelope;
+      gate?: number;
+    }
+  | {
+      /** 8-bit noise-channel kit. */
       type: 'chipDrums';
+      gain: number;
+      pan?: number;
+    }
+  | {
+      /** Soft, dusty boom-bap kit: kick, snare, hats, rim. */
+      type: 'lofiDrums';
       gain: number;
       pan?: number;
     };
@@ -97,6 +134,8 @@ export interface MelodyPartConfig extends PartBase {
   syncopation: number;
   /** Longest note, in steps. */
   maxDur: number;
+  /** Keep the line on the mode's pentatonic subset (no semitone clashes). */
+  pentatonic?: boolean;
 }
 
 export interface ArpPartConfig extends PartBase {
@@ -117,8 +156,23 @@ export interface ChordsPartConfig extends PartBase {
   patterns: readonly string[];
 }
 
+/** A held tonic (and fifth) under everything, retriggered every few bars or on a key change. */
+export interface DronePartConfig extends PartBase {
+  role: 'drone';
+  range: [number, number];
+  /** Also hold the fifth. */
+  fifth: boolean;
+  /** Bars per held note. */
+  bars: number;
+}
+
 export type PartConfig =
-  DrumsPartConfig | BassPartConfig | MelodyPartConfig | ArpPartConfig | ChordsPartConfig;
+  | DrumsPartConfig
+  | BassPartConfig
+  | MelodyPartConfig
+  | ArpPartConfig
+  | ChordsPartConfig
+  | DronePartConfig;
 
 export interface FxConfig {
   /** Reverb send at space = 0 and space = 1. */
@@ -129,6 +183,14 @@ export interface FxConfig {
   delaySteps: number;
   /** Master low-pass cutoff in Hz at brightness = 0 and brightness = 1. */
   filter: [number, number];
+  /** Reverb tail length in seconds (default 2.4). */
+  reverbSeconds?: number;
+  /** Vinyl crackle level at variation = 0 and variation = 1. */
+  crackle?: [number, number];
+  /** Tape wobble depth in cents at texture = 0 and texture = 1. */
+  wobble?: [number, number];
+  /** Random timing offset per note, in milliseconds, for a played-by-hand feel. */
+  humanize?: number;
 }
 
 /** A style is pure data: adding a style means adding one of these. */

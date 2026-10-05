@@ -8,6 +8,7 @@ import {
   euclid,
   mod,
   nearestChordTone,
+  pentatonicDegrees,
   voiceChord,
   type ModeId,
 } from '../src';
@@ -128,5 +129,23 @@ describe('euclid', () => {
     expect(str(euclid(4, 16))).toBe('x...x...x...x...');
     expect(str(euclid(0, 4))).toBe('....');
     expect(euclid(5, 13).filter(Boolean)).toHaveLength(5);
+  });
+});
+
+describe('pentatonicDegrees', () => {
+  it('gives the familiar pentatonic scales', () => {
+    const notes = (root: number, mode: ModeId) =>
+      pentatonicDegrees(mode).map((d) => new Scale(root, mode).degreeToMidi(d + 35) % 12);
+    expect(notes(0, 'ionian')).toEqual([0, 2, 4, 7, 9]);
+    expect(notes(9, 'aeolian')).toEqual([9, 0, 2, 4, 7]);
+  });
+
+  it('never drops the tonic and leaves no tritone', () => {
+    for (const mode of MODE_LADDER) {
+      const degrees = pentatonicDegrees(mode);
+      expect(degrees).toContain(0);
+      const pcs = degrees.map((d) => new Scale(0, mode).degreeToMidi(d));
+      for (const a of pcs) for (const b of pcs) expect(Math.abs(a - b)).not.toBe(6);
+    }
   });
 });

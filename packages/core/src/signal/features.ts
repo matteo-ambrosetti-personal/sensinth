@@ -77,6 +77,7 @@ export class FeatureExtractor {
   private unwrapped: number | undefined;
   private prevLevel: number | undefined;
   private features: Features = { level: 0.5, trend: 0, activity: 0, onset: 0 };
+  private lastNormalized = 0.5;
 
   constructor(desc: SensorDescriptor, timescale: Timescale) {
     this.preset = PRESETS[timescale];
@@ -113,6 +114,8 @@ export class FeatureExtractor {
       x = (this.normalizer as AdaptiveNormalizer).update(this.median.update(raw), dt);
     }
 
+    this.lastNormalized = this.circular ? ((x % 1) + 1) % 1 : x;
+
     // 2. Smooth into a level; circular levels wrap back into 0..1.
     const smooth = this.smoother.update(x, dt);
     const level = this.circular ? mod(smooth, 1) : clamp(smooth);
@@ -135,5 +138,16 @@ export class FeatureExtractor {
 
   get current(): Features {
     return this.features;
+  }
+
+  /** The normalized value before smoothing, 0..1. */
+  get normalized(): number {
+    return this.lastNormalized;
+  }
+
+  /** The raw-unit range mapped onto 0..1 (learned, or fixed by the descriptor). */
+  get bounds(): [number, number] | undefined {
+    if (this.circular) return [this.circular.lo, this.circular.lo + this.circular.period];
+    return this.normalizer?.bounds;
   }
 }
