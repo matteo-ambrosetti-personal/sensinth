@@ -8,12 +8,29 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: `http://localhost:${port}`,
-    ...devices['Desktop Chrome'],
-    launchOptions: {
-      // Chromium's built-in fake camera and microphone, with no permission prompt UI.
-      args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
-    },
   },
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: {
+          // Chromium's built-in fake camera and microphone, with no permission prompt UI.
+          args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+        },
+      },
+    },
+    // Safari's engine, for the Mac. CI installs WebKit and sets E2E_WEBKIT=1.
+    ...(process.env.E2E_WEBKIT
+      ? [
+          {
+            name: 'webkit',
+            use: { ...devices['Desktop Safari'] },
+            testMatch: /(render|lab)\.spec\.ts/,
+          },
+        ]
+      : []),
+  ],
   webServer: {
     command: `pnpm exec vite --port ${port} --strictPort`,
     url: `http://localhost:${port}/render-test.html`,

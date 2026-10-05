@@ -11,6 +11,7 @@ export default defineConfig(
       '**/node_modules/**',
       '**/test-results/**',
       '**/playwright-report/**',
+      'apps/web/android/**',
     ],
   },
   js.configs.recommended,

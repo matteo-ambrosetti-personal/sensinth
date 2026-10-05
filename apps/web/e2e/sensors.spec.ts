@@ -56,6 +56,22 @@ test.describe('on a phone', () => {
   });
 });
 
+test('on a computer, the pointer and keyboard drive the music', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#src-pointer')).toBeChecked();
+  await expect(page.locator('#src-sim')).not.toBeChecked();
+  await expect(sensorRow(page, 'Pointer speed')).toBeVisible();
+  await page.waitForTimeout(2000);
+  const calm = await dial(page, 'Energy');
+  const deadline = Date.now() + 4000;
+  for (let i = 0; Date.now() < deadline; i++) {
+    await page.mouse.move(100 + (i % 2) * 600, 200 + (i % 3) * 150, { steps: 4 });
+  }
+  expect(await dial(page, 'Energy')).toBeGreaterThan(calm + 20);
+  await page.keyboard.type('sensinth');
+  await expect(sensorRow(page, 'Typing').locator('.sensor-value')).not.toHaveText('0.00 keys/s');
+});
+
 test('motion reports a clear error on a computer without sensors', async ({ page }) => {
   await page.goto('/');
   await page.locator('label[for="src-motion"]').first().click();
@@ -103,6 +119,7 @@ test.describe('with camera, microphone and location allowed', () => {
 
 test('a recorded session downloads and replays', async ({ page }) => {
   await page.goto('/');
+  await page.locator('label[for="src-sim"]').first().click();
   await expect(sensorRow(page, 'Shake (sim)')).toBeVisible();
   await page.locator('#record').click();
   await page.waitForTimeout(1500);

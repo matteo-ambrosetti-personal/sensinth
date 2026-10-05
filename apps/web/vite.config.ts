@@ -2,7 +2,9 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 // BASE_PATH is set by the GitHub Pages workflow (e.g. /sensinth/).
-const base = process.env.BASE_PATH ?? '/';
+// NATIVE=1 builds for the Android app, which needs no service worker.
+const native = process.env.NATIVE === '1';
+const base = native ? '/' : (process.env.BASE_PATH ?? '/');
 
 export default defineConfig({
   base,
@@ -10,6 +12,7 @@ export default defineConfig({
   build: { target: 'es2022' },
   plugins: [
     VitePWA({
+      disable: native,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {

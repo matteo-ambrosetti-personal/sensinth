@@ -24,6 +24,8 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
-      - name: Install Chromium for end-to-end tests
-        run: pnpm --filter @sensinth/web exec playwright install --with-deps chromium
+      - name: Install Chromium and WebKit for end-to-end tests
+        run: pnpm --filter @sensinth/web exec playwright install --with-deps chromium webkit
       - run: pnpm e2e
+        env:
+          E2E_WEBKIT: '1'

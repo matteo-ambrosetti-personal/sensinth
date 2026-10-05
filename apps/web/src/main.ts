@@ -17,10 +17,13 @@ import { LocationSource } from './sensors/location';
 import { SourceManager } from './sensors/manager';
 import { MicrophoneSource } from './sensors/microphone';
 import { MotionSource } from './sensors/motion';
+import { NativeSensorsSource, isNativeApp } from './sensors/native';
+import { PointerSource } from './sensors/pointer';
 import { ReplayWebSource, formatDuration } from './sensors/replay';
 import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
+import { LabView } from './ui/lab';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
 import { SourcesView } from './ui/sources';
@@ -30,8 +33,6 @@ loadFonts();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const MIN_BPM = 60;
 const MAX_BPM = 200;
-/** Styles from the roadmap, shown so the picker reflects what is coming. */
-const UPCOMING = ['Ambient', 'Lo-fi'];
 
 const prefs: Prefs = loadPrefs();
 let style: Style = getStyle(prefs.styleId ?? '') ?? (STYLES[0] as Style);
@@ -93,16 +94,6 @@ function renderStyles(): void {
     btn.addEventListener('click', () => selectStyle(s));
     stylesEl.append(btn);
   }
-  for (const name of UPCOMING) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'style-chip';
-    btn.disabled = true;
-    btn.setAttribute('role', 'radio');
-    btn.setAttribute('aria-checked', 'false');
-    btn.innerHTML = `${name} <small>soon</small>`;
-    stylesEl.append(btn);
-  }
   styleDesc.textContent = `${style.description} Suggested tempo: ${style.defaultTempo} BPM.`;
 }
 
@@ -120,21 +111,28 @@ const locationSource = new LocationSource();
 player.keyHint = () => locationSource.keyHint();
 const sources = new SourceManager(player.hub, [
   new MotionSource(),
+  new PointerSource(),
   new MicrophoneSource(),
   new CameraSource(),
   locationSource,
   new DeviceSource(),
-  new LightSource(),
+  new NativeSensorsSource(),
+  // In the app, the native source reads the real light sensor instead.
+  ...(isNativeApp() ? [] : [new LightSource()]),
   new SimulatedWebSource(),
 ]);
 const sourcesView = new SourcesView($('sources'), sources, (id, on) => void toggleSource(id, on));
 sources.onChange = () => sourcesView.render();
 sourcesView.render();
 
-/** First visit: phones start with motion, computers with simulated sensors. */
+/**
+ * First visit: the Android app starts with motion and its native sensors,
+ * phone browsers with motion, computers with the pointer and keyboard.
+ */
 function defaultSources(): Record<string, boolean> {
+  if (isNativeApp()) return { motion: true, device: true, native: true };
   const touch = window.matchMedia('(pointer: coarse)').matches;
-  return touch ? { motion: true, device: true } : { sim: true, device: true };
+  return touch ? { motion: true, device: true } : { pointer: true, device: true };
 }
 
 async function toggleSource(id: string, on: boolean): Promise<void> {
@@ -239,6 +237,47 @@ playBtn.addEventListener('click', async () => {
 });
 renderTransport();
 
+// Modes: Play and Sensor lab ------------------------------------------------
+const lab = new LabView(
+  player.hub,
+  () => player.router,
+  (id) => player.setSolo(id),
+  {
+    select: $<HTMLSelectElement>('lab-channel'),
+    about: $('lab-about'),
+    rawNow: $('lab-raw-now'),
+    rawTitle: $('lab-raw-title'),
+    rawCanvas: $<HTMLCanvasElement>('lab-raw'),
+    procCanvas: $<HTMLCanvasElement>('lab-proc'),
+    time: $('lab-time'),
+    level: $('lab-level'),
+    normalized: $('lab-norm'),
+    activity: $('lab-activity'),
+    onsets: $('lab-onsets'),
+    trend: $('lab-trend'),
+    range: $('lab-range'),
+    rate: $('lab-rate'),
+    timescale: $('lab-scale'),
+    drives: $('lab-drives'),
+    solo: $<HTMLInputElement>('lab-solo'),
+    empty: $('lab-empty'),
+    body: $('lab-body'),
+  },
+  nowSeconds,
+);
+
+function setMode(mode: 'play' | 'lab'): void {
+  $('mode-play').setAttribute('aria-pressed', String(mode === 'play'));
+  $('mode-lab').setAttribute('aria-pressed', String(mode === 'lab'));
+  document
+    .querySelectorAll<HTMLElement>('.play-only')
+    .forEach((el) => (el.hidden = mode !== 'play'));
+  document.querySelectorAll<HTMLElement>('.lab-only').forEach((el) => (el.hidden = mode !== 'lab'));
+  lab.setActive(mode === 'lab');
+}
+$('mode-play').addEventListener('click', () => setMode('play'));
+$('mode-lab').addEventListener('click', () => setMode('lab'));
+
 // Live view -----------------------------------------------------------------
 const scope = new Scope($<HTMLCanvasElement>('scope'));
 const dials = new DialsView($('dials'));
@@ -257,6 +296,8 @@ function frame(t: number): void {
   const dt = Math.min(0.25, (t - lastFrame) / 1000);
   lastFrame = t;
   player.idleUpdate(dt);
+
+  lab.frame();
 
   const analyser = player.analyserNode;
   if (analyser || t - lastScope > 500) {

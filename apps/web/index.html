@@ -14,6 +14,10 @@
     <main class="app">
       <header class="top">
         <h1 class="brand">sensinth</h1>
+        <nav class="modes" aria-label="Mode">
+          <button id="mode-play" class="mode" type="button" aria-pressed="true">Play</button>
+          <button id="mode-lab" class="mode" type="button" aria-pressed="false">Sensor lab</button>
+        </nav>
         <div class="readout" aria-live="polite">
           <span id="now-key">Stopped</span>
           <span id="now-chord" class="readout-chord">–</span>
@@ -37,7 +41,93 @@
             <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
           </section>
 
-          <section class="panel" aria-labelledby="tempo-title">
+          <section class="panel lab-only" aria-labelledby="lab-title" hidden>
+            <div class="panel-head">
+              <h2 id="lab-title">Sensor lab</h2>
+              <label class="switch">
+                <input id="lab-solo" type="checkbox" />
+                <span class="switch-track" aria-hidden="true"></span>
+                Solo in the music
+              </label>
+            </div>
+            <p id="lab-empty" class="empty" hidden>Turn on a source to see its sensors here.</p>
+            <div id="lab-body" class="lab-body">
+              <label class="field" for="lab-channel">
+                <span class="field-label">Sensor</span>
+                <select id="lab-channel"></select>
+              </label>
+              <p id="lab-about" class="lab-about"></p>
+
+              <div class="chart-block">
+                <div class="chart-head">
+                  <h3 id="lab-raw-title">Raw reading</h3>
+                  <span id="lab-raw-now" class="chart-now">–</span>
+                </div>
+                <canvas
+                  id="lab-raw"
+                  class="lab-chart"
+                  role="img"
+                  aria-label="Raw sensor reading over the last 15 seconds"
+                ></canvas>
+              </div>
+
+              <div class="chart-block">
+                <div class="chart-head">
+                  <h3>What the engine uses <span class="h3-note">0 to 1</span></h3>
+                  <span id="lab-time" class="chart-now">now</span>
+                </div>
+                <ul class="legend">
+                  <li>
+                    <span class="swatch swatch-level" aria-hidden="true"></span>Level
+                    <b id="lab-level">–</b>
+                  </li>
+                  <li>
+                    <span class="swatch swatch-norm" aria-hidden="true"></span>Normalized
+                    <b id="lab-norm">–</b>
+                  </li>
+                  <li>
+                    <span class="swatch swatch-activity" aria-hidden="true"></span>Activity
+                    <b id="lab-activity">–</b>
+                  </li>
+                  <li>
+                    <span class="swatch swatch-onset" aria-hidden="true"></span>Onsets
+                    <b id="lab-onsets">–</b>
+                  </li>
+                </ul>
+                <canvas
+                  id="lab-proc"
+                  class="lab-chart"
+                  role="img"
+                  aria-label="Normalized value, smoothed level, activity and onsets over the last 15 seconds"
+                ></canvas>
+              </div>
+
+              <dl class="lab-facts">
+                <div>
+                  <dt>Trend</dt>
+                  <dd id="lab-trend">–</dd>
+                </div>
+                <div>
+                  <dt>Mapped range</dt>
+                  <dd id="lab-range">–</dd>
+                </div>
+                <div>
+                  <dt>Readings</dt>
+                  <dd id="lab-rate">–</dd>
+                </div>
+                <div>
+                  <dt>Timescale</dt>
+                  <dd id="lab-scale">–</dd>
+                </div>
+                <div class="wide">
+                  <dt>Drives</dt>
+                  <dd id="lab-drives">–</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          <section class="panel play-only" aria-labelledby="tempo-title">
             <h2 id="tempo-title">Tempo</h2>
             <div class="tempo">
               <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
@@ -57,7 +147,7 @@
             />
           </section>
 
-          <section class="panel" aria-labelledby="style-title">
+          <section class="panel play-only" aria-labelledby="style-title">
             <h2 id="style-title">Style</h2>
             <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
             <p id="style-desc" class="style-desc"></p>
@@ -91,7 +181,7 @@
             </p>
           </section>
 
-          <section class="panel" aria-labelledby="sensors-title">
+          <section class="panel play-only" aria-labelledby="sensors-title">
             <h2 id="sensors-title">Live sensors</h2>
             <ul id="sensors" class="sensors"></ul>
             <p id="sensors-empty" class="empty" hidden>No sensors on. Turn on a source above.</p>
@@ -99,9 +189,7 @@
         </div>
       </div>
 
-      <footer class="foot">
-        Sensor readings stay on this device. Ambient and Lo-fi styles come next.
-      </footer>
+      <footer class="foot">Sensor readings stay on this device.</footer>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

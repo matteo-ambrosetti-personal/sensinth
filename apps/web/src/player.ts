@@ -22,6 +22,7 @@ export class Player {
   private scope: AnalyserNode | undefined;
   /** Times (sensor clock) of recently scheduled drum hits. */
   private recentHits: number[] = [];
+  private soloId: string | undefined;
   /** Pitch class to start each new piece in, e.g. from the current place. */
   keyHint: () => number | undefined = () => undefined;
 
@@ -103,6 +104,12 @@ export class Player {
     void this.wakeLock.disable();
   }
 
+  /** Lets one channel drive the music alone (the Sensor lab's solo switch). */
+  setSolo(channelId: string | undefined): void {
+    this.soloId = channelId;
+    this.engine.router.setSolo(channelId);
+  }
+
   setTempo(bpm: number): void {
     this.bpm = bpm;
     this.scheduler?.setTempo(bpm);
@@ -119,12 +126,14 @@ export class Player {
 
   private newEngine(): Engine {
     const keyRoot = this.keyHint();
-    return new Engine({
+    const engine = new Engine({
       style: this.style,
       hub: this.hub,
       seed: Math.floor(Math.random() * 2 ** 31),
       ...(keyRoot !== undefined ? { keyRoot } : {}),
     });
+    engine.router.setSolo(this.soloId);
+    return engine;
   }
 
   private noteHits(events: readonly NoteEvent[], secondsAhead: number): void {
