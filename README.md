@@ -23,7 +23,10 @@ into reverb, closing a Mac's lid stops the tape, and an FX lane throws in risers
 throws and gate chops. Sources:
 your phone's motion, tilt, compass, microphone, camera, location, clock and battery, and in the
 Android app its light, pressure, temperature and humidity sensors; on a laptop, the trackpad and
-keyboard. The **Sensor lab** shows one sensor at a time, raw and processed. See
+keyboard. The **Flow** page draws the whole path live: each sensor's raw and processed signal,
+the routes it takes to the tracks, and how the tracks are mixed and sent through the effects to
+the speakers; tap a sensor to light up everything it moves. The **Sensor lab** shows one sensor at
+a time, raw and processed. See
 [docs/roadmap.md](docs/roadmap.md).
 
 ## Get it

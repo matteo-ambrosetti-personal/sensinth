@@ -3,7 +3,7 @@ import { STEPS_PER_BAR, STEPS_PER_BEAT } from './clock/grid';
 import { Harmony, type HarmonyInputs } from './composer/harmony';
 import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
 import { Fingerprinter, fingerprintChange, jitterOf, type Fingerprint } from './genome/fingerprint';
-import { buildGenome, firstChain, nextChain, type Genome } from './genome/genome';
+import { buildGenome, firstChain, nextChain, type FxTrigger, type Genome } from './genome/genome';
 import { mutatePhrase } from './genome/mutate';
 import { MACROS, type Macros, type Triggers } from './mapping/macros';
 import { Router } from './mapping/router';
@@ -92,6 +92,8 @@ export interface EngineView {
   keySource: 'place' | 'sensors' | 'colour';
   /** Changes made at the latest phrase start. */
   mutations: readonly string[];
+  /** Which effect each sensor's events fire. */
+  fxTriggers: readonly FxTrigger[];
 }
 
 /** Fingerprint distance that counts as a new scene. */
@@ -318,6 +320,7 @@ export class Engine {
       rebuild: { ...this.rebuildInfo },
       keySource: this.keySource,
       mutations: this.mutations,
+      fxTriggers: this.genome?.fxTriggers ?? [],
     };
   }
 

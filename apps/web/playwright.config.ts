@@ -26,7 +26,7 @@ export default defineConfig({
           {
             name: 'webkit',
             use: { ...devices['Desktop Safari'] },
-            testMatch: /(render|lab)\.spec\.ts/,
+            testMatch: /(render|lab|flow)\.spec\.ts/,
           },
         ]
       : []),

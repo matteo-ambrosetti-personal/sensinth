@@ -16,6 +16,7 @@
         <h1 class="brand">sensinth</h1>
         <nav class="modes" aria-label="Mode">
           <button id="mode-play" class="mode" type="button" aria-pressed="true">Play</button>
+          <button id="mode-flow" class="mode" type="button" aria-pressed="false">Flow</button>
           <button id="mode-lab" class="mode" type="button" aria-pressed="false">Sensor lab</button>
         </nav>
         <div class="readout" aria-live="polite">
@@ -55,6 +56,62 @@
             <dd id="g-change">–</dd>
           </div>
         </dl>
+      </section>
+
+      <section class="panel flow-only flow-panel" aria-labelledby="flow-title" hidden>
+        <div class="flow-head">
+          <h2 id="flow-title">
+            Flow <span class="h2-note">how each sensor reaches the sound</span>
+          </h2>
+          <div class="flow-tools">
+            <label class="flow-pick">
+              <span>Sensor</span>
+              <select id="flow-pick"></select>
+            </label>
+            <label class="flow-check"
+              ><input id="flow-strong" type="checkbox" checked /> Strong routes only</label
+            >
+            <button id="flow-pause" class="pill-btn" type="button" aria-pressed="false">
+              Pause
+            </button>
+          </div>
+        </div>
+        <ul class="flow-legend" aria-label="How to read the links">
+          <li><i class="lg fl-sensor"></i>Sensor modulation</li>
+          <li><i class="lg fl-internal"></i>LFOs, chaos, track hits</li>
+          <li><i class="lg fl-event"></i>Sensor events (effects, accents)</li>
+          <li><i class="lg fl-audio"></i>Audio</li>
+          <li><i class="lg fl-genome"></i>Shapes the next section</li>
+          <li><i class="lg is-down"></i>Pulls down; solid pushes up</li>
+          <li class="flow-legend-note">
+            Wider: stronger routing. Brighter, with moving dots: active now.
+          </li>
+        </ul>
+        <p id="flow-empty" class="empty">Turn on a sensor source to see where its signal goes.</p>
+        <div id="flow" class="flow">
+          <svg id="flow-links" class="flow-links" aria-hidden="true"></svg>
+          <div class="flow-col">
+            <h3>Sensors <span>raw → processed</span></h3>
+            <ol id="flow-sensors" class="flow-list flow-sensors"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Modulators</h3>
+            <ol id="flow-mods" class="flow-list flow-mods"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Tracks</h3>
+            <ol id="flow-tracks" class="flow-list flow-tracks"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Mix</h3>
+            <ol id="flow-buses" class="flow-list flow-buses"></ol>
+          </div>
+          <div id="flow-tip" class="flow-tip" role="tooltip" hidden></div>
+        </div>
+        <details class="flow-table">
+          <summary>Every link, as a list</summary>
+          <ul id="flow-table"></ul>
+        </details>
       </section>
 
       <section class="panel play-only" aria-labelledby="tracks-title">

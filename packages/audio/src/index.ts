@@ -18,7 +18,7 @@ export { createCrackleBuffer, createNoiseBuffer } from './noise';
 export { analyze, encodeWav, renderOffline } from './offline';
 export type { OfflineRenderOptions, RenderStats, SensorScript } from './offline';
 export * from './params';
-export { Renderer, type RenderState, type TrackMachine } from './renderer';
+export { Renderer, type BusId, type RenderState, type TrackMachine } from './renderer';
 export { LookaheadScheduler } from './scheduler';
 export type { SchedulerOptions } from './scheduler';
 export { WaveTable } from './waves';

@@ -90,9 +90,10 @@ export class MatrixView {
           <span class="mod-dest"></span>
           <div class="mod-bar" aria-hidden="true"><span class="mod-extent"></span><span class="mod-value"></span></div>
           <b class="mod-amount">${amount}</b>`;
-        (li.querySelector('.mod-src') as HTMLElement).textContent = this.sourceLabel(
+        (li.querySelector('.mod-src') as HTMLElement).textContent = sourceLabel(
           r.source,
           tracks,
+          this.channelLabel,
         );
         (li.querySelector('.mod-dest') as HTMLElement).textContent =
           `→ ${destLabel(r.dest, tracks)}`;
@@ -105,26 +106,32 @@ export class MatrixView {
       }
     }
   }
+}
 
-  private sourceLabel(source: string, tracks: ReadonlyMap<string, string>): string {
-    switch (sourceKind(source)) {
-      case 'sensor': {
-        const { channelId, feature } = parseSensorSource(source);
-        return `${this.channelLabel(channelId)} ${FEATURE[feature] ?? feature}`;
-      }
-      case 'macro':
-        return `${capitalize(source.slice(2))} dial`;
-      case 'lfo':
-        return `${trackName(source.slice(4), tracks)} LFO`;
-      case 'chaos':
-        return `Chaos ${source.slice(6).toUpperCase()}`;
-      case 'env':
-        return `${trackName(source.slice(4), tracks)} hits`;
+/** A route source in words, e.g. "Light level" or "T2 Snare LFO". */
+export function sourceLabel(
+  source: string,
+  tracks: ReadonlyMap<string, string>,
+  channelLabel: (channelId: string) => string,
+): string {
+  switch (sourceKind(source)) {
+    case 'sensor': {
+      const { channelId, feature } = parseSensorSource(source);
+      return `${channelLabel(channelId)} ${FEATURE[feature] ?? feature}`;
     }
+    case 'macro':
+      return `${capitalize(source.slice(2))} dial`;
+    case 'lfo':
+      return `${trackName(source.slice(4), tracks)} LFO`;
+    case 'chaos':
+      return `Chaos ${source.slice(6).toUpperCase()}`;
+    case 'env':
+      return `${trackName(source.slice(4), tracks)} hits`;
   }
 }
 
-function destLabel(dest: string, tracks: ReadonlyMap<string, string>): string {
+/** A route destination in words, e.g. "T3 Bass filter cutoff". */
+export function destLabel(dest: string, tracks: ReadonlyMap<string, string>): string {
   if (dest in GLOBAL) return GLOBAL[dest] as string;
   if (dest.startsWith('lfo:')) {
     const [slot, what] = dest.slice(4).split('.') as [string, string];

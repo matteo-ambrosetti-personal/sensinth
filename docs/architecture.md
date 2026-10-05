@@ -280,6 +280,16 @@ with its audio time and the UI shows the one that is sounding.
   cells, a legend, and the effect sounding now.
 - **Modulation** (`ui/matrix.ts`): every route grouped by source, with its amount and a centered
   bar showing what it adds right now.
+- **Flow** (`ui/flow/`): the signal path as a live diagram. Cards in four columns — sensors (a raw
+  trace in the sensor's units beside the processed one: normalized value, level, movement,
+  onsets), modulators (genome, dials, song values, LFOs, chaos), tracks (scope, level, pan,
+  sends, the params being modulated) and the mix (reverb, delay, the effects bus, master) — with
+  links drawn behind them in SVG. `links.ts` bundles the matrix routes, the dials each sensor
+  drives, the effects its events fire, the genome it shapes and the audio path into one link per
+  pair of nodes: width is strength, brightness and moving dots (a dash offset advanced every
+  frame) what passes now, dashes a route that pulls down. Hover or tap lights a node's path; a
+  phone stacks the columns and routes the picked sensor's links down the left gutter. The renderer
+  exposes analysers on the reverb and delay returns and on the effects bus for its meters.
 - Tempo, style, the dials, the sources and each sensor's value, level, activity, onsets and routes.
 
 ### Sensor sources (`apps/web/src/sensors`)

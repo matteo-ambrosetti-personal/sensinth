@@ -1209,3 +1209,524 @@ h3 {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+/* Flow: the signal path from each sensor to the speakers. Cards sit in four
+   columns on wide screens (one under the other on phones); links between them
+   are drawn in an SVG layer behind the cards. */
+.app.is-flow {
+  max-width: 1440px;
+}
+
+.flow-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.flow-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  font-size: 13px;
+}
+
+.flow-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.flow-pick select {
+  min-height: 32px;
+  max-width: 14rem;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.flow-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flow-check input {
+  accent-color: var(--accent);
+}
+
+#flow-pause {
+  min-height: 32px;
+}
+
+#flow-pause[aria-pressed='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--panel);
+}
+
+.flow-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.flow-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lg {
+  display: inline-block;
+  width: 22px;
+  border-top: 3px solid var(--muted);
+}
+
+.lg.fl-sensor {
+  border-color: var(--chart-level);
+}
+
+.lg.fl-internal {
+  border-color: var(--chart-activity);
+}
+
+.lg.fl-event {
+  border-color: var(--chart-onset);
+}
+
+.lg.fl-genome {
+  border-top-style: dotted;
+}
+
+.lg.is-down {
+  border-top-style: dashed;
+  border-color: var(--ink);
+}
+
+.flow {
+  position: relative;
+  display: grid;
+  gap: 20px;
+  padding-left: 18px;
+}
+
+@media (min-width: 880px) {
+  .flow {
+    /* Fixed cards; the free width goes to the gaps, where the links run. */
+    grid-template-columns: 290px 164px minmax(190px, 240px) 172px;
+    justify-content: space-between;
+    column-gap: 36px;
+    align-items: start;
+    padding-left: 0;
+  }
+}
+
+.flow-links {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.flow-col {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.flow-col h3 {
+  margin: 0;
+  font: 600 11px/1.2 var(--font-body);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.flow-col h3 span {
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-weight: 400;
+}
+
+.flow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 879px) {
+  .flow-mods,
+  .flow-buses {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.flow-group {
+  margin-top: 4px;
+  font: 600 10px/1.2 var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.flow-node {
+  pointer-events: auto;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 12px;
+  transition:
+    opacity 150ms ease,
+    border-color 150ms ease;
+}
+
+.flow-sensor,
+.flow-track {
+  cursor: pointer;
+}
+
+.flow-node[aria-pressed='true'] {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.flow.is-focused .flow-node:not(.is-lit) {
+  opacity: 0.35;
+}
+
+.fn-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fn-name {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fn-slot,
+.fn-tag,
+.fn-hash {
+  font: 500 11px var(--font-mono);
+  color: var(--muted);
+}
+
+.fn-tag,
+.fn-hash {
+  margin-left: auto;
+}
+
+.fn-signal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 4px;
+}
+
+.fn-signal figure {
+  position: relative;
+  margin: 0;
+  min-width: 0;
+}
+
+.fn-signal figcaption {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  max-width: calc(100% - 6px);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--inset);
+  font: 500 10px/1.3 var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fn-signal canvas {
+  display: block;
+  width: 100%;
+  height: 36px;
+  border-radius: 4px;
+  background: var(--inset);
+}
+
+.fn-arrow {
+  color: var(--muted);
+  align-self: center;
+}
+
+.fn-out,
+.fn-in,
+.fn-note {
+  margin: 0;
+  font: 400 11px/1.3 var(--font-mono);
+  color: var(--muted);
+}
+
+.fn-scope {
+  display: block;
+  width: 100%;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--inset);
+}
+
+.fn-led {
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+  align-self: center;
+}
+
+.fn-led.is-on {
+  background: var(--led);
+}
+
+.fn-mix {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr) 1.8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 6px;
+  font: 500 9px var(--font-mono);
+  color: var(--muted);
+}
+
+.fn-meter {
+  position: relative;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--inset);
+  overflow: hidden;
+}
+
+.fn-meter.thin {
+  height: 4px;
+}
+
+.fn-meter > i {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: left;
+  transform: scaleX(0);
+  border-radius: 3px;
+}
+
+.fn-pan {
+  position: relative;
+  display: block;
+  height: 6px;
+}
+
+.fn-pan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+  background: var(--inset);
+}
+
+.fn-pan > i {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+  transform: translateX(-50%);
+}
+
+.fn-bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.fn-bars li {
+  display: grid;
+  grid-template-columns: 4.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  font: 400 10px var(--font-mono);
+  color: var(--muted);
+}
+
+.flow-mod-lfo .fn-bars li,
+.flow-mod-chaos .fn-bars li {
+  grid-template-columns: 1.8rem minmax(0, 1fr);
+}
+
+.flow-mod-lfo .fn-meter > i,
+.flow-mod-chaos .fn-meter > i {
+  background: var(--chart-activity);
+}
+
+.flow-track.is-muted {
+  border-style: dashed;
+}
+
+.fn-fx {
+  display: block;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--inset);
+  color: var(--muted);
+  font: 600 11px var(--font-mono);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fn-fx.is-on {
+  background: var(--chart-onset);
+  color: var(--panel);
+}
+
+.flow-placeholder {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Links */
+.flow-link,
+.flow-dot,
+.flow-hit {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.flow-link {
+  transition: opacity 150ms ease;
+}
+
+.fl-sensor {
+  stroke: var(--chart-level);
+}
+
+.fl-internal {
+  stroke: var(--chart-activity);
+}
+
+.fl-event {
+  stroke: var(--chart-onset);
+}
+
+.fl-audio {
+  stroke: var(--muted);
+}
+
+.fl-genome {
+  stroke: var(--muted);
+}
+
+.flow-link.fl-genome {
+  stroke-dasharray: 1 5;
+}
+
+.flow-link.is-down {
+  stroke-dasharray: 7 5;
+  stroke-linecap: butt;
+}
+
+.flow-hit {
+  stroke: transparent;
+  stroke-width: 14px;
+  pointer-events: stroke;
+  cursor: help;
+}
+
+.flow-tip {
+  position: absolute;
+  z-index: 5;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.flow-tip ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+}
+
+.flow-tip li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.flow-tip-num {
+  font: 500 11px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.flow-table summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.flow-table ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-dot {
+    display: none;
+  }
+}

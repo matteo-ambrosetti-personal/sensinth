@@ -24,7 +24,8 @@ import { ReplayWebSource, formatDuration } from './sensors/replay';
 import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
-import { LabView } from './ui/lab';
+import { FlowView } from './ui/flow/flow';
+import { LabView, SOURCE_NAMES } from './ui/lab';
 import { MatrixView } from './ui/matrix';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
@@ -284,16 +285,47 @@ const lab = new LabView(
   nowSeconds,
 );
 
-function setMode(mode: 'play' | 'lab'): void {
-  $('mode-play').setAttribute('aria-pressed', String(mode === 'play'));
-  $('mode-lab').setAttribute('aria-pressed', String(mode === 'lab'));
-  document
-    .querySelectorAll<HTMLElement>('.play-only')
-    .forEach((el) => (el.hidden = mode !== 'play'));
-  document.querySelectorAll<HTMLElement>('.lab-only').forEach((el) => (el.hidden = mode !== 'lab'));
+const flow = new FlowView(
+  {
+    hub: player.hub,
+    router: () => player.router,
+    view: () => player.view(),
+    trackAnalyser: (slot) => player.trackAnalyser(slot),
+    busAnalyser: (bus) => player.busAnalyser(bus),
+    masterAnalyser: () => player.analyserNode,
+    fxNow: () => player.fxNow(),
+    isMuted: (slot) => player.isMuted(slot),
+    now: nowSeconds,
+    sourceName: (source) => SOURCE_NAMES[source ?? ''] ?? source ?? 'Other',
+  },
+  {
+    root: $('flow'),
+    sensors: $('flow-sensors'),
+    mods: $('flow-mods'),
+    tracks: $('flow-tracks'),
+    buses: $('flow-buses'),
+    svg: $('flow-links') as unknown as SVGSVGElement,
+    tip: $('flow-tip'),
+    pick: $<HTMLSelectElement>('flow-pick'),
+    strong: $<HTMLInputElement>('flow-strong'),
+    pause: $<HTMLButtonElement>('flow-pause'),
+    empty: $('flow-empty'),
+    table: $('flow-table'),
+  },
+);
+
+type Mode = 'play' | 'flow' | 'lab';
+function setMode(mode: Mode): void {
+  for (const m of ['play', 'flow', 'lab'] as const) {
+    $(`mode-${m}`).setAttribute('aria-pressed', String(mode === m));
+    document.querySelectorAll<HTMLElement>(`.${m}-only`).forEach((el) => (el.hidden = mode !== m));
+  }
+  document.querySelector('.app')?.classList.toggle('is-flow', mode === 'flow');
   lab.setActive(mode === 'lab');
+  flow.setActive(mode === 'flow');
 }
 $('mode-play').addEventListener('click', () => setMode('play'));
+$('mode-flow').addEventListener('click', () => setMode('flow'));
 $('mode-lab').addEventListener('click', () => setMode('lab'));
 
 // Live view -----------------------------------------------------------------
@@ -358,6 +390,7 @@ function frame(t: number): void {
   player.idleUpdate(dt);
 
   lab.frame();
+  flow.frame(t);
 
   const analyser = player.analyserNode;
   if (analyser || t - lastScope > 500) {

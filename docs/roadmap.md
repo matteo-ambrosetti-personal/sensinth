@@ -96,14 +96,22 @@ for every palette.
   stutters, a clap washes, the lid closing stops the tape), by the song's structure (a riser into
   a new scene, a stutter or brake at a section's end) and by an Elektron-style FX lane.
 
-## Next: the Flow page and every sensor
+## Phase 3.7: the Flow page (done)
 
-- A **Flow** page drawing each sensor's signal, before and after processing, on its way through
-  the routings to the tracks, the mix and the effects.
-- **Every sensor** on a Mac (a native app reading the lid angle, ambient light, battery,
-  temperatures and more; the accelerometer and gyroscope as an opt-in) and on Android phones
-  (every hardware sensor, battery, thermal and Wi-Fi signals), plus game controllers, MIDI
-  controllers and trackpad pressure in the browser.
+A third mode next to Play and the Sensor lab draws the whole signal path, live: every sensor's raw
+reading beside what processing makes of it, the links from each sensor to the dials, the genome,
+the tracks and the effects, the modulators (dials, song values, LFOs, chaos), each track with its
+scope, level, pan and sends, and the reverb, delay, effects bus and master. Link width shows a
+route's strength, brightness and moving dots what passes now, dashes a route that pulls down.
+Hovering or tapping a sensor or track lights its whole path; on a phone the cards stack and the
+picked sensor's links run down the side.
+
+## Next: every sensor
+
+**Every sensor** on a Mac (a native app reading the lid angle, ambient light, battery,
+temperatures and more; the accelerometer and gyroscope as an opt-in) and on Android phones (every
+hardware sensor, battery, thermal and Wi-Fi signals), plus game controllers, MIDI controllers and
+trackpad pressure in the browser.
 
 ## Phase 4: Pico sensor node
 

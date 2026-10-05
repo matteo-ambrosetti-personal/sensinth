@@ -1,4 +1,4 @@
-import { LookaheadScheduler, Renderer } from '@sensinth/audio';
+import { LookaheadScheduler, Renderer, type BusId } from '@sensinth/audio';
 import {
   Engine,
   SensorHub,
@@ -59,6 +59,11 @@ export class Player {
   /** The output analyser for the oscilloscope, while playing. */
   get analyserNode(): AnalyserNode | undefined {
     return this.playing ? this.scope : undefined;
+  }
+
+  /** A return's or the mix's analyser, while playing. */
+  busAnalyser(bus: BusId): AnalyserNode | undefined {
+    return this.playing ? this.renderer?.busAnalyser(bus) : undefined;
   }
 
   /** A track's analyser (after its mute), while playing. */

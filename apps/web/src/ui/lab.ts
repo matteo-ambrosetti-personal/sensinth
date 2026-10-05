@@ -192,7 +192,8 @@ export class LabView {
   }
 }
 
-const SOURCE_NAMES: Record<string, string> = {
+/** Names of sensor sources, for grouping channels. */
+export const SOURCE_NAMES: Record<string, string> = {
   phone: 'Phone',
   clock: 'Clock',
   sim: 'Simulated',

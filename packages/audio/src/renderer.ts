@@ -75,6 +75,9 @@ const FEEDBACK = 0.35;
 /** The FX lane's slot; muting it silences the triggered effects. */
 const FX_SLOT = 'fx';
 
+/** Points in the mix with their own analyser: the two returns and the mix after the effects. */
+export type BusId = 'reverb' | 'delay' | 'fx';
+
 /**
  * Turns note events into sound. Each track has its own filter, drive,
  * level, pan, reverb and delay sends and analyser, all following the
@@ -102,6 +105,8 @@ export class Renderer {
   /** Into the reverb at full level, for the wash. */
   private readonly washIn: GainNode;
   private readonly perf: PerformanceFx;
+  private readonly reverbReturn: GainNode;
+  private readonly buses: Record<BusId, AnalyserNode>;
   private readonly filter: BiquadFilterNode;
   private readonly driveCurve: Float32Array<ArrayBuffer>;
   private convolver: ConvolverNode;
@@ -148,7 +153,9 @@ export class Renderer {
     this.washIn = ctx.createGain();
     this.convolver = ctx.createConvolver();
     this.convolver.buffer = createImpulse(ctx, this.reverbSeconds);
-    this.reverbBus.connect(this.convolver).connect(this.dryBus);
+    this.reverbReturn = ctx.createGain();
+    this.reverbReturn.connect(this.dryBus);
+    this.reverbBus.connect(this.convolver).connect(this.reverbReturn);
     this.washIn.connect(this.convolver);
 
     // Tempo-synced feedback delay, darkened on every repeat.
@@ -174,6 +181,18 @@ export class Renderer {
     });
     this.dryBus.connect(this.perf.input);
     this.perf.output.connect(this.filter).connect(comp).connect(clip).connect(this.output);
+
+    const analyser = (from: AudioNode) => {
+      const a = ctx.createAnalyser();
+      a.fftSize = 512;
+      from.connect(a);
+      return a;
+    };
+    this.buses = {
+      reverb: analyser(this.reverbReturn),
+      delay: analyser(damp),
+      fx: analyser(this.perf.output),
+    };
 
     // Tape wobble LFOs (depth set per style in `update`).
     this.wobble = ctx.createGain();
@@ -258,6 +277,11 @@ export class Renderer {
   /** Triggered effects playing at `time` (audio clock). */
   fxAt(time: number): FxPlaying[] {
     return this.perf.activeAt(time);
+  }
+
+  /** The analyser on a return or on the mix after the effects. */
+  busAnalyser(bus: BusId): AnalyserNode {
+    return this.buses[bus];
   }
 
   /** The analyser after a track's mute and pan, for its scope. */
@@ -430,7 +454,7 @@ export class Renderer {
     this.reverbSeconds = seconds;
     const next = this.ctx.createConvolver();
     next.buffer = createImpulse(this.ctx, seconds);
-    this.reverbBus.connect(next).connect(this.dryBus);
+    this.reverbBus.connect(next).connect(this.reverbReturn);
     this.washIn.connect(next);
     const old = this.convolver;
     this.reverbBus.disconnect(old);
