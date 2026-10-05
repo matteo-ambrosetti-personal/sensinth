@@ -1,13 +1,29 @@
 import './style.css';
-import { STYLES, getStyle, type Router, type Style } from '@sensinth/core';
+import {
+  STYLES,
+  SensorRecorder,
+  getStyle,
+  parseRecording,
+  type Router,
+  type Style,
+} from '@sensinth/core';
 import { loadFonts } from './fonts';
 import { Player } from './player';
 import { loadPrefs, savePrefs, type Prefs } from './prefs';
+import { CameraSource } from './sensors/camera';
+import { DeviceSource } from './sensors/device';
+import { LightSource } from './sensors/light';
+import { LocationSource } from './sensors/location';
+import { SourceManager } from './sensors/manager';
+import { MicrophoneSource } from './sensors/microphone';
+import { MotionSource } from './sensors/motion';
+import { ReplayWebSource, formatDuration } from './sensors/replay';
 import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
+import { SourcesView } from './ui/sources';
 
 loadFonts();
 
@@ -21,7 +37,6 @@ const prefs: Prefs = loadPrefs();
 let style: Style = getStyle(prefs.styleId ?? '') ?? (STYLES[0] as Style);
 let bpm = clampBpm(prefs.bpm ?? style.defaultTempo);
 const player = new Player(style, bpm);
-const sim = new SimulatedWebSource();
 
 // Tempo ---------------------------------------------------------------------
 const tempoInput = $<HTMLInputElement>('tempo');
@@ -100,18 +115,98 @@ function selectStyle(s: Style): void {
 }
 renderStyles();
 
-// Sensors -------------------------------------------------------------------
-const simToggle = $<HTMLInputElement>('sim-toggle');
-simToggle.checked = prefs.simulated ?? true;
+// Sources -------------------------------------------------------------------
+const locationSource = new LocationSource();
+player.keyHint = () => locationSource.keyHint();
+const sources = new SourceManager(player.hub, [
+  new MotionSource(),
+  new MicrophoneSource(),
+  new CameraSource(),
+  locationSource,
+  new DeviceSource(),
+  new LightSource(),
+  new SimulatedWebSource(),
+]);
+const sourcesView = new SourcesView($('sources'), sources, (id, on) => void toggleSource(id, on));
+sources.onChange = () => sourcesView.render();
+sourcesView.render();
 
-async function applySimulated(): Promise<void> {
-  if (simToggle.checked) await player.addSource(sim);
-  else player.removeSource(sim.id);
-  prefs.simulated = simToggle.checked;
-  savePrefs(prefs);
+/** First visit: phones start with motion, computers with simulated sensors. */
+function defaultSources(): Record<string, boolean> {
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  return touch ? { motion: true, device: true } : { sim: true, device: true };
 }
-simToggle.addEventListener('change', () => void applySimulated());
-void applySimulated();
+
+async function toggleSource(id: string, on: boolean): Promise<void> {
+  if (on) await sources.enable(id);
+  else sources.disable(id);
+  if (id !== 'replay') {
+    prefs.sources = { ...prefs.sources, [id]: sources.isOn(id) };
+    savePrefs(prefs);
+  }
+}
+
+prefs.sources ??= defaultSources();
+for (const [id, on] of Object.entries(prefs.sources)) if (on) void sources.restore(id);
+
+// Recorder ------------------------------------------------------------------
+const recorder = new SensorRecorder();
+const recordBtn = $<HTMLButtonElement>('record');
+const recordLabel = $('record-label');
+const recorderStatus = $('recorder-status');
+const loadInput = $<HTMLInputElement>('load-recording');
+
+recordBtn.addEventListener('click', () => {
+  if (!recorder.recording) {
+    recorder.start(player.hub);
+    recordBtn.setAttribute('aria-pressed', 'true');
+    recordLabel.textContent = 'Stop and save';
+    renderRecorder();
+    return;
+  }
+  const rec = recorder.stop();
+  recordBtn.setAttribute('aria-pressed', 'false');
+  recordLabel.textContent = 'Record sensors';
+  if (rec.samples.length === 0) {
+    recorderStatus.textContent = 'Nothing recorded. Turn on a source first.';
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+  const name = `sensinth-${stamp}.json`;
+  download(name, JSON.stringify(rec));
+  recorderStatus.textContent = `Saved ${name}: ${rec.descriptors.length} channels, ${formatDuration(rec.samples.at(-1)?.[0] ?? 0)}.`;
+});
+
+loadInput.addEventListener('change', async () => {
+  const file = loadInput.files?.[0];
+  loadInput.value = '';
+  if (!file) return;
+  try {
+    const rec = parseRecording(JSON.parse(await file.text()));
+    sources.add(new ReplayWebSource(rec, file.name));
+    await sources.enable('replay');
+    recorderStatus.textContent = `Replaying ${file.name}. Turn other sources off to hear only the recording.`;
+  } catch (err) {
+    recorderStatus.textContent =
+      err instanceof SyntaxError ? `${file.name} is not valid JSON.` : (err as Error).message;
+  }
+});
+
+function renderRecorder(): void {
+  if (!recorder.recording) return;
+  recorderStatus.textContent = `Recording ${formatDuration(recorder.duration)} · ${recorder.sampleCount.toLocaleString()} readings`;
+}
+
+function download(name: string, text: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 // Transport -----------------------------------------------------------------
 const playBtn = $<HTMLButtonElement>('play');
@@ -121,9 +216,12 @@ function renderTransport(): void {
   const playing = player.playing;
   playBtn.setAttribute('aria-pressed', String(playing));
   playBtn.setAttribute('aria-label', playing ? 'Stop' : 'Play');
+  const channels = player.hub.list();
   if (!playing) hint.textContent = 'You set tempo and style. The sensors write the rest.';
-  else if (player.hub.list().length === 0)
+  else if (channels.length === 0)
     hint.textContent = 'No sensors on: the dials rest at their defaults.';
+  else if (channels.some((c) => c.desc.source === 'phone'))
+    hint.textContent = 'Shake, tilt, clap or cover the camera. The music follows.';
   else hint.textContent = 'Playing. Watch the dials follow the sensors.';
 }
 
@@ -178,6 +276,7 @@ function frame(t: number): void {
     }
     sensorsView.update(channels, nowSeconds());
     dials.update(player.router.macros);
+    renderRecorder();
 
     const snap = player.snapshot();
     nowKey.textContent = snap ? snap.keyName : 'Stopped';

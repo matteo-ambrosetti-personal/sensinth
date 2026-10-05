@@ -1,7 +1,10 @@
 import { LookaheadScheduler, Renderer } from '@sensinth/audio';
-import { Engine, SensorHub, type EngineSnapshot, type Style } from '@sensinth/core';
-import { nowSeconds, type WebSensorSource } from './sensors/source';
+import { Engine, SensorHub, type EngineSnapshot, type NoteEvent, type Style } from '@sensinth/core';
+import { nowSeconds } from './sensors/source';
 import { ScreenWakeLock } from './wakeLock';
+
+/** Seconds after one of our own drum hits during which mic onsets are ignored. */
+const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
 
 /**
  * Wires sensors, the engine, the renderer and the clock together. Every press
@@ -13,16 +16,20 @@ export class Player {
   private ctx: AudioContext | undefined;
   private renderer: Renderer | undefined;
   private scheduler: LookaheadScheduler | undefined;
-  private readonly sources = new Map<string, WebSensorSource>();
   private readonly wakeLock = new ScreenWakeLock();
   private style: Style;
   private bpm: number;
   private scope: AnalyserNode | undefined;
+  /** Times (sensor clock) of recently scheduled drum hits. */
+  private recentHits: number[] = [];
+  /** Pitch class to start each new piece in, e.g. from the current place. */
+  keyHint: () => number | undefined = () => undefined;
 
   constructor(style: Style, bpm: number) {
     this.style = style;
     this.bpm = bpm;
     this.engine = this.newEngine();
+    this.hub.onsetGate = (id, t) => this.allowOnset(id, t);
   }
 
   get playing(): boolean {
@@ -48,17 +55,6 @@ export class Player {
 
   snapshot(): EngineSnapshot | undefined {
     return this.playing ? this.engine.snapshot() : undefined;
-  }
-
-  async addSource(source: WebSensorSource): Promise<void> {
-    if (this.sources.has(source.id)) return;
-    this.sources.set(source.id, source);
-    await source.start(this.hub);
-  }
-
-  removeSource(id: string): void {
-    this.sources.get(id)?.stop(this.hub);
-    this.sources.delete(id);
   }
 
   /** Must be called from a user gesture (browsers block audio otherwise). */
@@ -89,6 +85,7 @@ export class Player {
       }
       renderer.update(this.engine.router.macros, time);
       renderer.schedule(events, time, stepSeconds);
+      this.noteHits(events, time - ctx.currentTime);
     };
     this.scheduler = scheduler;
     scheduler.start(this.bpm);
@@ -121,10 +118,29 @@ export class Player {
   }
 
   private newEngine(): Engine {
+    const keyRoot = this.keyHint();
     return new Engine({
       style: this.style,
       hub: this.hub,
       seed: Math.floor(Math.random() * 2 ** 31),
+      ...(keyRoot !== undefined ? { keyRoot } : {}),
     });
+  }
+
+  private noteHits(events: readonly NoteEvent[], secondsAhead: number): void {
+    if (!events.some((e) => e.voice)) return;
+    this.recentHits.push(nowSeconds() + secondsAhead);
+    if (this.recentHits.length > 64) this.recentHits.shift();
+  }
+
+  /**
+   * The microphone hears the music too. While playing, ignore sound onsets
+   * that line up with our own drum hits, so the music does not trigger itself.
+   */
+  private allowOnset(id: string, t: number): boolean {
+    if (!this.playing) return true;
+    if (!this.hub.get(id)?.desc.kind.startsWith('sound.')) return true;
+    const [before, after] = SELF_HIT_WINDOW;
+    return !this.recentHits.some((h) => t - h > before && t - h < after);
   }
 }

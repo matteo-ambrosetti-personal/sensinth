@@ -70,25 +70,37 @@
         </div>
 
         <div class="column">
-          <section class="panel" aria-labelledby="sensors-title">
-            <div class="panel-head">
-              <h2 id="sensors-title">Sensors</h2>
-              <label class="switch">
-                <input id="sim-toggle" type="checkbox" checked />
-                <span class="switch-track" aria-hidden="true"></span>
-                Simulated
-              </label>
+          <section class="panel" aria-labelledby="sources-title">
+            <h2 id="sources-title">Sources</h2>
+            <ul id="sources" class="sources"></ul>
+            <div class="recorder">
+              <button id="record" class="pill-btn" type="button" aria-pressed="false">
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span id="record-label">Record sensors</span>
+              </button>
+              <label class="pill-btn" for="load-recording">Load recording</label>
+              <input
+                id="load-recording"
+                class="visually-hidden"
+                type="file"
+                accept=".json,application/json"
+              />
             </div>
-            <ul id="sensors" class="sensors"></ul>
-            <p id="sensors-empty" class="empty" hidden>
-              No sensors connected. Turn on simulated sensors to hear the engine.
+            <p id="recorder-status" class="recorder-status" aria-live="polite">
+              Record a session to replay it later, on this or any other device.
             </p>
+          </section>
+
+          <section class="panel" aria-labelledby="sensors-title">
+            <h2 id="sensors-title">Live sensors</h2>
+            <ul id="sensors" class="sensors"></ul>
+            <p id="sensors-empty" class="empty" hidden>No sensors on. Turn on a source above.</p>
           </section>
         </div>
       </div>
 
       <footer class="foot">
-        Phase 1: simulated sensors drive the music. Phone sensors come next.
+        Sensor readings stay on this device. Ambient and Lo-fi styles come next.
       </footer>
     </main>
     <script type="module" src="/src/main.ts"></script>

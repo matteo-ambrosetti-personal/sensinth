@@ -1,14 +1,19 @@
 import { SimulatedSource, type SensorHub } from '@sensinth/core';
 import { nowSeconds, type WebSensorSource } from './source';
 
-/** Runs the core simulator on a 30 Hz timer. */
+/** Fake sensors on a 30 Hz timer, for trying the app on a computer. */
 export class SimulatedWebSource implements WebSensorSource {
   readonly id = 'sim';
-  readonly label = 'Simulated sensors';
+  readonly label = 'Simulated';
+  readonly description = 'Fake sensors, for computers';
   private readonly sim = new SimulatedSource(Math.floor(Math.random() * 1e9));
   private timer: ReturnType<typeof setInterval> | undefined;
 
-  start(hub: SensorHub): void {
+  unsupportedReason(): string | undefined {
+    return undefined;
+  }
+
+  async start(hub: SensorHub): Promise<void> {
     if (this.timer !== undefined) return;
     for (const d of this.sim.descriptors) hub.announce(d);
     const tick = () => hub.pushAll(this.sim.sampleAt(nowSeconds()));

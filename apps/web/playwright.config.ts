@@ -9,6 +9,10 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${port}`,
     ...devices['Desktop Chrome'],
+    launchOptions: {
+      // Chromium's built-in fake camera and microphone, with no permission prompt UI.
+      args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+    },
   },
   webServer: {
     command: `pnpm exec vite --port ${port} --strictPort`,

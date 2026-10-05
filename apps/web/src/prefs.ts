@@ -2,7 +2,8 @@
 export interface Prefs {
   bpm?: number;
   styleId?: string;
-  simulated?: boolean;
+  /** Which sensor sources were on, by source id. */
+  sources?: Record<string, boolean>;
 }
 
 const KEY = 'sensinth.prefs.v1';
