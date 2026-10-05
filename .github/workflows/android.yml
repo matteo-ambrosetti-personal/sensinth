@@ -1,0 +1,59 @@
+name: Android app
+
+# Builds the Android app (APK). On main it also replaces the
+# "Sensinth for Android (latest)" pre-release so the newest APK is always
+# one download away.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: pnpm install --frozen-lockfile
+      - name: Build the web app and copy it into the Android project
+        run: pnpm --filter @sensinth/web android:sync
+      - name: Build the APK
+        working-directory: apps/web/android
+        run: ./gradlew assembleRelease --no-daemon -PversionCode=${{ github.run_number }}
+      - run: cp apps/web/android/app/build/outputs/apk/release/app-release.apk sensinth.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sensinth-apk
+          path: sensinth.apk
+      - name: Publish the APK as the latest pre-release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest sensinth.apk \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Sensinth for Android (latest)" \
+            --notes "Build ${{ github.run_number }} from ${{ github.sha }}.
+
+          Install: open this page on your Android phone, download sensinth.apk, open it and allow your browser to install unknown apps when asked. Later builds install over this one and keep your settings.
+
+          This build is signed with a test key and is meant for testing only."
