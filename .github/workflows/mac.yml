@@ -1,0 +1,57 @@
+name: Mac app
+
+# Builds Sensinth.app on a macOS runner. On main it also replaces the
+# "Sensinth for Mac (latest)" pre-release with the zipped app.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the web app for the Mac app
+        run: pnpm --filter @sensinth/web build
+        env:
+          NATIVE: '1'
+      - name: Build Sensinth.app
+        run: apps/mac/build.sh
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sensinth-mac
+          path: apps/mac/build/Sensinth-mac.zip
+      - name: Publish the app as the latest pre-release
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mac-latest --yes --cleanup-tag || true
+          gh release create mac-latest apps/mac/build/Sensinth-mac.zip \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Sensinth for Mac (latest)" \
+            --notes "Build ${{ github.run_number }} from ${{ github.sha }}.
+
+          Install: download Sensinth-mac.zip, unzip it and move Sensinth.app to Applications. The app is not notarized, so the first time macOS blocks it: open System Settings → Privacy & Security, scroll down and click Open Anyway (or run xattr -dr com.apple.quarantine /Applications/Sensinth.app in Terminal).
+
+          Turn on Mac sensors (app) in Sources for the lid angle, light, battery, heat, CPU, Wi-Fi, Bluetooth and more. Mac motion asks for your password to read the accelerometer and gyroscope (Apple Silicon MacBooks).
+
+          This build is ad-hoc signed and meant for testing only."

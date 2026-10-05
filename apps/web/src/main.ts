@@ -15,6 +15,7 @@ import { CameraSource } from './sensors/camera';
 import { DeviceSource } from './sensors/device';
 import { GamepadSource } from './sensors/gamepad';
 import { LidAngleSource } from './sensors/lid';
+import { MacMotionSource, MacSensorsSource, isMacApp } from './sensors/mac';
 import { LightSource } from './sensors/light';
 import { LocationSource } from './sensors/location';
 import { SourceManager } from './sensors/manager';
@@ -127,7 +128,10 @@ const sources = new SourceManager(player.hub, [
   new NativeSensorsSource(),
   // In the app, the native source reads the real light sensor instead.
   ...(isNativeApp() ? [] : [new LightSource()]),
-  new LidAngleSource(),
+  // The Mac app reads the lid natively (and faster) than WebHID can.
+  ...(isMacApp() ? [] : [new LidAngleSource()]),
+  new MacSensorsSource(),
+  new MacMotionSource(),
   new ComputePressureSource(),
   new GamepadSource(),
   new MidiSource(),
@@ -139,10 +143,12 @@ sourcesView.render();
 
 /**
  * First visit: the Android app starts with motion and its native sensors,
- * phone browsers with motion, computers with the pointer and keyboard.
+ * the Mac app with the pointer, keyboard and Mac sensors, phone browsers with
+ * motion, computers with the pointer and keyboard.
  */
 function defaultSources(): Record<string, boolean> {
   if (isNativeApp()) return { motion: true, device: true, native: true };
+  if (isMacApp()) return { pointer: true, device: true, mac: true };
   const touch = window.matchMedia('(pointer: coarse)').matches;
   return touch ? { motion: true, device: true } : { pointer: true, device: true };
 }

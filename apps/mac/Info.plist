@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.sensinth.mac</string>
+	<key>CFBundleName</key>
+	<string>Sensinth</string>
+	<key>CFBundleDisplayName</key>
+	<string>Sensinth</string>
+	<key>CFBundleExecutable</key>
+	<string>Sensinth</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.3.__BUILD__</string>
+	<key>CFBundleVersion</key>
+	<string>__BUILD__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>The camera's light, colour and movement shape the music. Nothing is recorded or sent anywhere.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>The loudness and brightness of the room shape the music. Nothing is recorded or sent anywhere.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>How many Bluetooth devices are around, and how close, shapes the music. No device is connected to.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Where you are picks the key of the music. Your location stays on this Mac.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Where you are picks the key of the music. Your location stays on this Mac.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
