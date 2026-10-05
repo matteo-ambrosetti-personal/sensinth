@@ -307,6 +307,7 @@ const tracksView = new TracksView($('tracks'), $('tracks-empty'), {
   analyser: (slot) => player.trackAnalyser(slot),
   isMuted: (slot) => player.isMuted(slot),
   setMuted: (slot, muted) => player.setMuted(slot, muted),
+  fxNow: () => player.fxNow(),
 });
 const channelLabel = (id: string) => player.hub.get(id)?.desc.label ?? id;
 const matrixView = new MatrixView($('matrix'), $('matrix-empty'), channelLabel);

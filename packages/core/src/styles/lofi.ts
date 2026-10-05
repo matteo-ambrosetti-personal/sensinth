@@ -216,6 +216,7 @@ export const lofi: Style = {
     scales: [1, 1, 0.5, 0.75],
     lfoPeriod: [16, 384],
     maxEventsPerStep: 12,
+    effects: ['tapeStop', 'brake', 'wash', 'dubThrow', 'dive', 'crush'],
   },
   fx: {
     reverb: [0.05, 0.25],

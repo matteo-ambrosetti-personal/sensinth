@@ -1019,6 +1019,41 @@ h3 {
   background: var(--inset);
 }
 
+/* The FX lane shows the effect sounding now where other tracks have a scope. */
+.track-fx-now {
+  grid-area: scope;
+  display: grid;
+  place-items: center;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--inset);
+  color: var(--muted);
+  font: 600 11px var(--font-mono);
+  text-align: center;
+  overflow: hidden;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
+}
+
+.track-fx-now.is-on {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.track.is-fx .track-params li {
+  grid-template-columns: 2.1rem minmax(0, 1fr);
+}
+
+.fx-name {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .track-grid {
   grid-area: grid;
   display: block;

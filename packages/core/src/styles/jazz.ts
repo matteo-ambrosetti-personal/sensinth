@@ -213,6 +213,7 @@ export const jazz: Style = {
     scales: [1],
     lfoPeriod: [32, 512],
     maxEventsPerStep: 12,
+    effects: ['wash', 'dubThrow', 'dive', 'sweep'],
   },
   fx: {
     reverb: [0.1, 0.3],

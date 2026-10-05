@@ -57,7 +57,7 @@ export function neutralParams(): TrackParams {
 }
 
 /** Song-wide destinations of the modulation matrix. */
-export const GLOBAL_PARAMS = ['tension', 'brightness', 'swing', 'space'] as const;
+export const GLOBAL_PARAMS = ['tension', 'brightness', 'swing', 'space', 'fx'] as const;
 export type GlobalParam = (typeof GLOBAL_PARAMS)[number];
 export type GlobalParams = Record<GlobalParam, number>;
 

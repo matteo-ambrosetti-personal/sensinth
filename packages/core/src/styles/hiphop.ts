@@ -191,6 +191,7 @@ export const hiphop: Style = {
     scales: [1, 1, 1, 0.5],
     lfoPeriod: [16, 256],
     maxEventsPerStep: 12,
+    effects: ['brake', 'tapeStop', 'stutter', 'dubThrow', 'dive', 'crush', 'wash'],
   },
   fx: {
     reverb: [0.04, 0.2],

@@ -1,3 +1,4 @@
+import type { FxId } from '../fx/effects';
 import type { TrackParams } from '../mod/params';
 import type { Retrig, TrackRole } from '../seq/types';
 
@@ -22,6 +23,8 @@ export interface NoteEvent {
   retrig?: Retrig;
   /** Slide into this note from the previous one. */
   slide?: boolean;
+  /** An effect on the whole mix (role `fx`); `vel` is its depth, `durSteps` its length. */
+  fx?: FxId;
   /** The track's parameters for this note (base or p-lock, plus modulation), 0..1. */
   params?: TrackParams;
 }

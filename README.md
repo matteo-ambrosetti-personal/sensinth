@@ -9,12 +9,18 @@ It runs on an Android phone (as an app or in Chrome) and on a Mac (as an install
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.5. Three styles (Chiptune, Ambient, Lo-fi) are sound palettes that the sensors
-compose in, like a Digitakt played by your surroundings: tracks with their own lengths, trig
+**Status:** Phase 3.6. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
+**Free** has no style at all: the sensors also pick the instruments, from every style. It plays
+like a Digitakt driven by your surroundings: tracks with their own lengths, trig
 conditions, parameter locks and LFOs, and a modulation matrix where sensors, LFOs and chaos maps
 move each other. A different place, light or colour rewrites the track; even a tiny change in a
 reading changes the next phrase, and nothing repeats. The **Tracks** panel shows each track's
-waveform, steps and parameters (with Mute), the **Modulation** panel every live routing. Sources:
+waveform, steps and parameters (with Mute), the **Modulation** panel every live routing. Blues and
+jazz leave the key the way they should (12-bar forms, ii–V–I, tritone subs, blue notes), and
+**triggered effects** answer what happens around you: a shake stutters the mix, a clap washes it
+into reverb, closing a Mac's lid stops the tape, and an FX lane throws in risers, dives, dub
+throws and gate chops. Sources:
 your phone's motion, tilt, compass, microphone, camera, location, clock and battery, and in the
 Android app its light, pressure, temperature and humidity sensors; on a laptop, the trackpad and
 keyboard. The **Sensor lab** shows one sensor at a time, raw and processed. See
@@ -78,7 +84,11 @@ Sensors → signal processing → ───────┼─► phrase mutation
    hits modulate every track parameter, the LFOs and each other. Every sensor has at least two
    strong routes.
 6. **The harmony keeper**: sensors never set a pitch directly. Every note is realized against the
-   current scale and chord, on the 16th-note grid, with chord tones on strong beats.
+   current scale and chord, on the 16th-note grid, with chord tones on strong beats. In blues and
+   jazz each chord brings its own scale.
+7. **Triggered effects** (stutter, tape stop, vinyl brake, riser, filter dive, reverb wash, dub
+   throw, bit crush, gate chop, ring mod) fire on sensor events, at structural moments and from
+   the FX lane, one at a time.
 
 Details: [docs/architecture.md](docs/architecture.md).
 
@@ -160,6 +170,7 @@ docs/            Architecture, roadmap, sensor protocol.
 
 A style is data: a palette of machines (sounds with ranges for their patterns and parameters),
 which roles are always there, the modes, chord-progression table, track lengths and limits, plus
-effects. Copy `packages/core/src/styles/chiptune.ts`, change it, and register it in
-`packages/core/src/styles/index.ts`. The tests run every registered style through the harmony
-checks and the browser render test automatically.
+effects (and which triggered effects suit it). Copy `packages/core/src/styles/chiptune.ts` (or
+`blues.ts` for chord scales and forms), change it, and register it in
+`packages/core/src/styles/index.ts`; Free picks up its machines automatically. The tests run every
+registered style through the harmony checks, the effect rules and the browser render test.

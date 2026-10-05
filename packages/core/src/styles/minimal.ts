@@ -136,6 +136,7 @@ export const minimal: Style = {
     scales: [1, 15 / 16],
     lfoPeriod: [64, 512],
     maxEventsPerStep: 12,
+    effects: ['gate', 'dubThrow', 'wash', 'sweep', 'dive'],
   },
   fx: {
     reverb: [0.12, 0.35],

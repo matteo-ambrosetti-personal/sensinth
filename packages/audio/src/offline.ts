@@ -1,8 +1,11 @@
 import {
   Engine,
+  FX_INFO,
   SimulatedSource,
   STEPS_PER_BAR,
   stepDuration,
+  type FxId,
+  type NoteEvent,
   type SensorDescriptor,
   type SensorSample,
   type Style,
@@ -26,6 +29,8 @@ export interface OfflineRenderOptions {
   sampleRate?: number;
   /** Returns true for each track slot to mute. */
   mute?: (slot: string) => boolean;
+  /** Fires this effect at full depth on the second beat of every other bar. */
+  forceFx?: FxId;
 }
 
 export interface RenderStats {
@@ -36,6 +41,8 @@ export interface RenderStats {
   /** Count of NaN or infinite samples. */
   nonFinite: number;
   events: number;
+  /** Triggered effects among the events. */
+  fx: number;
   /** Track slots that existed during the render. */
   tracks: string[];
 }
@@ -63,12 +70,19 @@ export async function renderOffline(
   renderer.setTempo(bpm);
 
   let events = 0;
+  let fx = 0;
   let version = -1;
   const slots = new Set<string>();
   for (let step = 0; step < steps; step++) {
     const t = start + step * stepSeconds;
     engine.hub.pushAll(sensors.sampleAt(t));
-    const evs = engine.tick(stepSeconds);
+    const evs: NoteEvent[] = engine.tick(stepSeconds);
+    if (opts.forceFx && step % (2 * STEPS_PER_BAR) === STEPS_PER_BAR + 4) {
+      const forced = opts.forceFx;
+      const steps = FX_INFO[forced].steps;
+      evs.splice(0, evs.length, ...evs.filter((e) => !e.fx));
+      evs.push({ part: 'fx', role: 'fx', step, durSteps: steps, vel: 1, fx: forced });
+    }
     if (engine.genomeVersion !== version) {
       version = engine.genomeVersion;
       const machines = engine.trackMachines();
@@ -78,8 +92,10 @@ export async function renderOffline(
         slots.add(m.slot);
         if (opts.mute) renderer.setMuted(m.slot, opts.mute(m.slot));
       }
+      if (opts.mute) renderer.setMuted('fx', opts.mute('fx'));
     }
     events += evs.length;
+    fx += evs.filter((e) => e.fx).length;
     const view = engine.view();
     renderer.update(
       {
@@ -93,10 +109,10 @@ export async function renderOffline(
     renderer.schedule(evs, t, stepSeconds);
   }
   const buffer = await ctx.startRendering();
-  return { buffer, stats: { ...analyze(buffer), events, tracks: [...slots].sort() } };
+  return { buffer, stats: { ...analyze(buffer), events, fx, tracks: [...slots].sort() } };
 }
 
-export function analyze(buffer: AudioBuffer): Omit<RenderStats, 'events' | 'tracks'> {
+export function analyze(buffer: AudioBuffer): Omit<RenderStats, 'events' | 'fx' | 'tracks'> {
   let peak = 0;
   let sumSq = 0;
   let nonFinite = 0;

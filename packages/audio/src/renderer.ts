@@ -14,6 +14,7 @@ import {
   type Style,
   type TrackParams,
 } from '@sensinth/core';
+import { PerformanceFx, type FxPlaying } from './fx/performance';
 import { createImpulse, createSoftClipCurve } from './fx/reverb';
 import { DrumMachine } from './instruments/drums';
 import { FmInstrument } from './instruments/fm';
@@ -69,11 +70,16 @@ const DEFAULT_REVERB_SECONDS = 2.4;
 const GLIDE = 0.025;
 /** Most a track's drive pushes into the shaper. */
 const MAX_DRIVE = 8;
+/** Delay feedback when no dub throw is playing. */
+const FEEDBACK = 0.35;
+/** The FX lane's slot; muting it silences the triggered effects. */
+const FX_SLOT = 'fx';
 
 /**
  * Turns note events into sound. Each track has its own filter, drive,
  * level, pan, reverb and delay sends and analyser, all following the
- * modulation matrix every step. The mix ends in a master low-pass that
+ * modulation matrix every step. Triggered effects (stutter, tape stop,
+ * riser, …) play on the whole mix, which then ends in a master low-pass that
  * follows `brightness`, a compressor and a soft clipper, so output never
  * clips. Uses only standard Web Audio, so it also works offline.
  */
@@ -86,10 +92,16 @@ export class Renderer {
   private stepSeconds = stepDuration(120);
   private readonly waves: WaveTable;
   private readonly noise: AudioBuffer;
+  /** Every track, before the reverb and delay returns join. */
+  private readonly mixBus: GainNode;
   private readonly dryBus: GainNode;
   private readonly reverbBus: GainNode;
   private readonly delayBus: GainNode;
   private readonly delay: DelayNode;
+  private readonly feedback: GainNode;
+  /** Into the reverb at full level, for the wash. */
+  private readonly washIn: GainNode;
+  private readonly perf: PerformanceFx;
   private readonly filter: BiquadFilterNode;
   private readonly driveCurve: Float32Array<ArrayBuffer>;
   private convolver: ConvolverNode;
@@ -127,26 +139,41 @@ export class Renderer {
     clip.oversample = '2x';
     this.output = ctx.createGain();
     this.output.gain.value = MASTER_GAIN;
-    this.dryBus.connect(this.filter).connect(comp).connect(clip).connect(this.output);
+    this.mixBus = ctx.createGain();
+    this.mixBus.connect(this.dryBus);
     this.output.connect(destination);
 
     // Reverb bus: tracks send into it, `space` sets its return.
     this.reverbBus = ctx.createGain();
+    this.washIn = ctx.createGain();
     this.convolver = ctx.createConvolver();
     this.convolver.buffer = createImpulse(ctx, this.reverbSeconds);
     this.reverbBus.connect(this.convolver).connect(this.dryBus);
+    this.washIn.connect(this.convolver);
 
     // Tempo-synced feedback delay, darkened on every repeat.
     this.delayBus = ctx.createGain();
     this.delay = ctx.createDelay(2);
-    const feedback = ctx.createGain();
-    feedback.gain.value = 0.35;
+    this.feedback = ctx.createGain();
+    this.feedback.gain.value = FEEDBACK;
     const damp = ctx.createBiquadFilter();
     damp.type = 'lowpass';
     damp.frequency.value = 3500;
     this.delayBus.connect(this.delay);
-    this.delay.connect(damp).connect(feedback).connect(this.delay);
+    this.delay.connect(damp).connect(this.feedback).connect(this.delay);
     damp.connect(this.dryBus);
+
+    // Triggered effects on the whole mix, before the master filter.
+    this.perf = new PerformanceFx(ctx, {
+      mix: this.mixBus,
+      reverbIn: this.washIn,
+      delayIn: this.delay,
+      delayFeedback: this.feedback.gain,
+      feedbackRest: FEEDBACK,
+      noise: this.noise,
+    });
+    this.dryBus.connect(this.perf.input);
+    this.perf.output.connect(this.filter).connect(comp).connect(clip).connect(this.output);
 
     // Tape wobble LFOs (depth set per style in `update`).
     this.wobble = ctx.createGain();
@@ -219,12 +246,18 @@ export class Renderer {
   setMuted(slot: string, muted: boolean): void {
     if (muted) this.muted.add(slot);
     else this.muted.delete(slot);
+    if (slot === FX_SLOT && muted) this.perf.stop();
     const chain = this.tracks.get(slot);
     chain?.mute.gain.setTargetAtTime(muted ? 0 : 1, this.ctx.currentTime, 0.02);
   }
 
   isMuted(slot: string): boolean {
     return this.muted.has(slot);
+  }
+
+  /** Triggered effects playing at `time` (audio clock). */
+  fxAt(time: number): FxPlaying[] {
+    return this.perf.activeAt(time);
   }
 
   /** The analyser after a track's mute and pan, for its scope. */
@@ -283,6 +316,12 @@ export class Renderer {
   schedule(events: readonly NoteEvent[], gridTime: number, stepSeconds = this.stepSeconds): void {
     const humanize = this.fx.humanize ?? 0;
     for (const ev of events) {
+      if (ev.fx) {
+        if (this.muted.has(ev.part)) continue;
+        const at = gridTime + swingOffset(ev.step, this.swing, stepSeconds);
+        this.perf.trigger(ev.fx, at, ev.durSteps * stepSeconds, ev.vel, stepSeconds);
+        continue;
+      }
       const chain = this.tracks.get(ev.part);
       if (!chain) continue;
       let time =
@@ -337,7 +376,7 @@ export class Renderer {
     filter.connect(dry).connect(level);
     filter.connect(pre).connect(shaper).connect(wet).connect(level);
     level.connect(mute).connect(pan);
-    pan.connect(this.dryBus);
+    pan.connect(this.mixBus);
     pan.connect(reverb).connect(this.reverbBus);
     pan.connect(delay).connect(this.delayBus);
     pan.connect(analyser);
@@ -392,8 +431,10 @@ export class Renderer {
     const next = this.ctx.createConvolver();
     next.buffer = createImpulse(this.ctx, seconds);
     this.reverbBus.connect(next).connect(this.dryBus);
+    this.washIn.connect(next);
     const old = this.convolver;
     this.reverbBus.disconnect(old);
+    this.washIn.disconnect(old);
     this.convolver = next;
     // Let the old tail ring out before dropping it.
     if ('close' in this.ctx) setTimeout(() => old.disconnect(), seconds * 1000);

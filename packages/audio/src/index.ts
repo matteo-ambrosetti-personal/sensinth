@@ -1,4 +1,5 @@
 export { applyEnvelope } from './envelope';
+export { PerformanceFx, crushCurve, type FxPlaying } from './fx/performance';
 export { createImpulse, createSoftClipCurve } from './fx/reverb';
 export {
   CHIP_KIT,

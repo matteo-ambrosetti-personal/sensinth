@@ -123,6 +123,12 @@ exports[`Engine > matches the recorded output for fixed sensors 1`] = `
     0.819,
   ],
   [
+    21,
+    "fx",
+    "sweep",
+    0.606,
+  ],
+  [
     22,
     "t3",
     47,
@@ -319,6 +325,12 @@ exports[`Engine > matches the recorded output for fixed sensors 1`] = `
     "t2",
     "noise",
     1,
+  ],
+  [
+    56,
+    "fx",
+    "sweep",
+    0.52,
   ],
   [
     58,

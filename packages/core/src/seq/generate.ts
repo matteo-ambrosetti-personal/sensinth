@@ -1,5 +1,6 @@
 import { beatStrength } from '../clock/grid';
 import { clamp, expLerp, lerp } from '../math';
+import { FX_IDS, FX_INFO, type FxId } from '../fx/effects';
 import { LFO_SHAPES, type LfoSpec } from '../mod/lfo';
 import { PARAM_INFO, TRACK_PARAMS, type TrackParam, type TrackParams } from '../mod/params';
 import type { Rng } from '../random';
@@ -104,7 +105,69 @@ export function writePattern(
       trigs[0] = trig(1, spec.length, { note: { tone: 0, chord: true, oct: 0 }, vel: 0.7 });
       return trigs;
     }
+    case 'fx':
+      return fxPattern(rng, spec.length, FX_IDS);
   }
+}
+
+/**
+ * The FX lane: a few effect trigs, mostly on the last beats of a phrase,
+ * with conditions so they come back now and then rather than every loop.
+ */
+/** Effects that halt the music; the lane leaves them to sensors and section ends. */
+const LANE_SKIP: readonly FxId[] = ['tapeStop', 'brake'];
+
+export function fxLane(rng: Rng, effects: readonly FxId[], period: [number, number]): TrackSpec {
+  const length = rng.pick([32, 64]);
+  return {
+    slot: 'fx',
+    role: 'fx',
+    machine: 'fx',
+    length,
+    scale: 1,
+    trigs: fxPattern(rng, length, effects),
+    base: baseParams(rng, FX_MACHINE),
+    range: [0, 0],
+    lfo: randomLfo(rng, period),
+  };
+}
+
+const FX_MACHINE: Machine = {
+  label: 'FX lane',
+  role: 'fx',
+  patch: { type: 'drum', voice: 'noise', flavor: 'chip', gain: 0 },
+  density: [0.05, 0.1],
+};
+
+function fxPattern(rng: Rng, n: number, effects: readonly FxId[]): (Trig | undefined)[] {
+  const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
+  const pool = laneEffects(effects);
+  if (pool.length === 0) return trigs;
+  const count = Math.max(1, Math.round((n / 64) * rng.range(0.8, 2.2)));
+  for (let j = 0; j < count; j++) trigs[fxPosition(rng, n)] = fxTrig(rng, pool);
+  return trigs;
+}
+
+function laneEffects(effects: readonly FxId[]): FxId[] {
+  return effects.filter((f) => !LANE_SKIP.includes(f));
+}
+
+/** Effects land mostly on the last beat of a bar. */
+function fxPosition(rng: Rng, n: number): number {
+  const bar = rng.int(0, Math.max(0, Math.floor(n / 16) - 1));
+  return Math.min(n - 1, bar * 16 + rng.pick([8, 12, 12, 14]));
+}
+
+function fxTrig(rng: Rng, effects: readonly FxId[]): Trig {
+  const fx = rng.pick(effects);
+  return {
+    fx,
+    vel: rng.range(0.5, 1),
+    len: FX_INFO[fx].steps,
+    prob: Math.round(rng.range(0.5, 0.95) * 20) / 20,
+    cond: rng.chance(0.75) ? randomCondition(rng) : { kind: 'always' },
+    micro: 0,
+  };
 }
 
 /** A new trig for position `index` of an existing track, used by phrase mutations. */
@@ -128,6 +191,11 @@ export function newTrigAt(rng: Rng, spec: TrackSpec, index: number): Trig {
       return trig(1, rng.int(2, 8), { note: { tone: 0, chord: true, oct: 0 }, vel: vel * 0.8 });
     case 'drone':
       return trig(1, spec.length, { note: { tone: 0, chord: true, oct: 0 }, vel: 0.7 });
+    case 'fx': {
+      // Mutations reuse the lane's own effects.
+      const own = spec.trigs.flatMap((t) => (t?.fx ? [t.fx] : []));
+      return fxTrig(rng, own.length > 0 ? own : laneEffects(FX_IDS));
+    }
   }
 }
 

@@ -212,6 +212,7 @@ export const chiptune: Style = {
     scales: [1, 1, 1, 2, 0.5, 0.75],
     lfoPeriod: [8, 256],
     maxEventsPerStep: 12,
+    effects: ['stutter', 'crush', 'gate', 'ring', 'sweep', 'dive', 'brake'],
   },
   fx: {
     reverb: [0.04, 0.3],

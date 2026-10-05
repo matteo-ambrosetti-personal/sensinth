@@ -65,6 +65,7 @@ export class Realizer {
     const n = note ?? { tone: 0, chord: true, oct: 0 };
     switch (spec.role) {
       case 'drum':
+      case 'fx':
         return [];
       case 'bass':
         return [this.bass(n, h, lo, hi, register)];

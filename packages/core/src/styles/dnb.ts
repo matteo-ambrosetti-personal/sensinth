@@ -166,6 +166,7 @@ export const dnb: Style = {
     scales: [1, 1, 0.5],
     lfoPeriod: [16, 512],
     maxEventsPerStep: 12,
+    effects: ['stutter', 'brake', 'tapeStop', 'sweep', 'dive', 'crush', 'gate', 'ring', 'dubThrow'],
   },
   fx: {
     reverb: [0.08, 0.3],

@@ -1,3 +1,4 @@
+import { FX_IDS, KIND_FX, type FxId } from '../fx/effects';
 import type { Macros } from '../mapping/macros';
 import { clamp } from '../math';
 import {
@@ -18,7 +19,7 @@ import {
 } from '../mod/matrix';
 import type { TrackParam } from '../mod/params';
 import { Rng, hashInts, hashString } from '../random';
-import { generateTrack } from '../seq/generate';
+import { fxLane, generateTrack } from '../seq/generate';
 import type { TrackRole, TrackSpec } from '../seq/types';
 import type { Timescale } from '../sensors/types';
 import type { FxConfig, Palette, Style } from '../styles/schema';
@@ -54,6 +55,14 @@ export interface Genome {
   density: number;
   /** Effects for this section, when the style offers several (Free). */
   fx?: FxConfig;
+  /** Which effect each fast sensor's events fire. */
+  fxTriggers: FxTrigger[];
+}
+
+/** A sensor whose events (onsets) fire an effect on the whole mix. */
+export interface FxTrigger {
+  channelId: string;
+  fx: FxId;
 }
 
 /**
@@ -99,6 +108,9 @@ export function buildGenome(
     }),
   );
 
+  const effects = palette.effects ?? FX_IDS;
+  const fxTrack =
+    effects.length > 0 ? fxLane(rng.fork('fx'), effects, palette.lfoPeriod) : undefined;
   const modeCount = Math.min(palette.modes.length, rng.int(2, 3));
   const modes = byBrightness(shuffle(rng, palette.modes).slice(0, modeCount));
   const allForms = palette.chordScales?.forms ?? [];
@@ -112,7 +124,7 @@ export function buildGenome(
     chain,
     coarseHash: fp.coarseHash,
     section,
-    tracks,
+    tracks: fxTrack ? [...tracks, fxTrack] : tracks,
     matrix: {
       routes: buildRoutes(rng.fork('routes'), fp, tracks),
       lfos: Object.fromEntries(tracks.map((t) => [t.slot, t.lfo])),
@@ -129,10 +141,26 @@ export function buildGenome(
     },
     swing: rng.next(),
     density,
+    fxTriggers: fxTriggers(fp, chain, effects),
     ...(style.fxPresets && style.fxPresets.length > 0
       ? { fx: style.fxPresets[hashInts(chain, 0xf0) % style.fxPresets.length] as FxConfig }
       : {}),
   };
+}
+
+/** Fast sensors (and the lid) fire effects: the kind's own effect when the style allows it. */
+function fxTriggers(fp: Fingerprint, chain: number, effects: readonly FxId[]): FxTrigger[] {
+  if (effects.length === 0) return [];
+  return fp.channels
+    .filter((ch) => ch.timescale === 'fast' || ch.kind in KIND_FX)
+    .map((ch) => {
+      const own = KIND_FX[ch.kind];
+      const fx =
+        own && effects.includes(own)
+          ? own
+          : (effects[hashInts(hashString(ch.kind), chain) % effects.length] as FxId);
+      return { channelId: ch.id, fx };
+    });
 }
 
 function chooseMachines(palette: Palette, rng: Rng): { slot: string; machineId: string }[] {
@@ -296,6 +324,12 @@ export function buildRoutes(rng: Rng, fp: Fingerprint, tracks: readonly TrackSpe
     source: macroSource('energy'),
     dest: trackDest(pickTrack(rhythmic).slot, 'prob'),
     amount: rng.range(0.3, 0.6),
+    curve: 'lin',
+  });
+  routes.push({
+    source: macroSource('variation'),
+    dest: globalDest('fx'),
+    amount: 0.5,
     curve: 'lin',
   });
   routes.push({

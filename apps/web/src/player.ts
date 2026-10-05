@@ -4,6 +4,7 @@ import {
   SensorHub,
   type EngineSnapshot,
   type EngineView,
+  type FxId,
   type NoteEvent,
   type Style,
 } from '@sensinth/core';
@@ -63,6 +64,12 @@ export class Player {
   /** A track's analyser (after its mute), while playing. */
   trackAnalyser(slot: string): AnalyserNode | undefined {
     return this.playing ? this.renderer?.analyser(slot) : undefined;
+  }
+
+  /** Triggered effects sounding now. */
+  fxNow(): FxId[] {
+    if (!this.playing || !this.ctx || !this.renderer) return [];
+    return this.renderer.fxAt(this.ctx.currentTime).map((p) => p.fx);
   }
 
   /** While stopped, keeps the dials following the sensors. */

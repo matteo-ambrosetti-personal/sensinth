@@ -2,6 +2,7 @@ export * from './clock/events';
 export * from './clock/grid';
 export { Harmony, type HarmonyInputs } from './composer/harmony';
 export * from './engine';
+export * from './fx/effects';
 export * from './genome/fingerprint';
 export * from './genome/genome';
 export * from './genome/mutate';

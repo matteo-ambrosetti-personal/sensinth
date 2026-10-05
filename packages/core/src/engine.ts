@@ -1,6 +1,7 @@
 import type { NoteEvent } from './clock/events';
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from './clock/grid';
 import { Harmony, type HarmonyInputs } from './composer/harmony';
+import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
 import { Fingerprinter, fingerprintChange, jitterOf, type Fingerprint } from './genome/fingerprint';
 import { buildGenome, firstChain, nextChain, type Genome } from './genome/genome';
 import { mutatePhrase } from './genome/mutate';
@@ -97,6 +98,12 @@ export interface EngineView {
 const SCENE_DISTANCE = 0.35;
 /** Steps the distance must hold before the pattern is rewritten. */
 const SCENE_HOLD = STEPS_PER_BEAT;
+/** How a section may end, by weight. */
+const SECTION_ENDINGS: readonly [FxId, number][] = [
+  ['stutter', 3],
+  ['brake', 1],
+  ['tapeStop', 1],
+];
 /** Fewest bars between two scene changes. */
 const SCENE_MIN_BARS = 8;
 /** Per-step decay of a sensor's onset envelope. */
@@ -155,7 +162,16 @@ export class Engine {
   private readonly onsetEnv = new Map<string, number>();
   private readonly onsetSeen = new Map<string, number>();
   private trackState = new Map<string, { params: TrackParams; fired: number }>();
-  private globals: GlobalParams = { tension: 0.5, brightness: 0.5, swing: 0, space: 0.5 };
+  /** Channels with an onset on the latest step. */
+  private readonly freshOnsets = new Set<string>();
+  /** Effects waiting to fire, in priority order; at most one fires per step. */
+  private fxQueue: { fx: FxId; depth: number; steps: number }[] = [];
+  /** Step until which an exclusive effect (stutter, tape stop, …) holds the mix. */
+  private fxBusyUntil = -1;
+  private readonly fxCooldown = new Map<FxId, number>();
+  /** The lid closing fires a tape stop once until it settles again. */
+  private lidLatch = false;
+  private globals: GlobalParams = { tension: 0.5, brightness: 0.5, swing: 0, space: 0.5, fx: 0.5 };
   private rebuildInfo: EngineView['rebuild'] = { reason: 'start', step: 0 };
   private keySource: EngineView['keySource'] = 'sensors';
   private mutations: string[] = [];
@@ -206,11 +222,13 @@ export class Engine {
 
   /** Every track's slot and machine, for the renderer. */
   trackMachines(): { slot: string; machineId: string; machine: Machine }[] {
-    return (this.genome?.tracks ?? []).map((t) => ({
-      slot: t.slot,
-      machineId: t.machine,
-      machine: this.style.palette.machines[t.machine] as Machine,
-    }));
+    return (this.genome?.tracks ?? [])
+      .filter((t) => t.role !== 'fx')
+      .map((t) => ({
+        slot: t.slot,
+        machineId: t.machine,
+        machine: this.style.palette.machines[t.machine] as Machine,
+      }));
   }
 
   /** Generates the notes for the next step. `stepSeconds` drives macro smoothing. */
@@ -278,7 +296,7 @@ export class Engine {
         slot: t.slot,
         role: t.role,
         machine: t.machine,
-        label: machine?.label ?? t.machine,
+        label: machine?.label ?? (t.role === 'fx' ? 'FX lane' : t.machine),
         ...(t.voice ? { voice: t.voice } : {}),
         length: t.length,
         scale: t.scale,
@@ -310,13 +328,17 @@ export class Engine {
   }
 
   private trackOnsets(live: readonly ChannelState[]): void {
+    this.freshOnsets.clear();
     for (const [id, e] of this.onsetEnv) this.onsetEnv.set(id, e * ONSET_DECAY);
     for (const ch of live) {
       const id = ch.desc.id;
       const seen = this.onsetSeen.get(id);
       // Onsets from before the channel was first seen do not count.
       if (seen === undefined) this.onsetEnv.set(id, 0);
-      else if (ch.lastOnsetT > seen) this.onsetEnv.set(id, 1);
+      else if (ch.lastOnsetT > seen) {
+        this.onsetEnv.set(id, 1);
+        this.freshOnsets.add(id);
+      }
       this.onsetSeen.set(id, ch.lastOnsetT);
     }
   }
@@ -330,6 +352,12 @@ export class Engine {
     if (change.distance > SCENE_DISTANCE) {
       this.farSteps++;
       this.farChannel = change.channel?.label;
+      // A new scene is coming at the next bar line: rise into it.
+      const barsAtNextBar = Math.floor((step - this.sectionStart) / STEPS_PER_BAR) + 1;
+      const left = STEPS_PER_BAR - (step % STEPS_PER_BAR);
+      if (this.farSteps === SCENE_HOLD && barsAtNextBar >= SCENE_MIN_BARS && left >= 2) {
+        this.queueFx('sweep', 0.8, left);
+      }
     } else {
       this.farSteps = 0;
     }
@@ -447,6 +475,7 @@ export class Engine {
       brightness: clamp(macros.brightness + off(globalDest('brightness'))),
       space: clamp(macros.space + off(globalDest('space'))),
       swing: clamp(genome.swing + off(globalDest('swing'))),
+      fx: clamp(0.5 + off(globalDest('fx'))),
     };
 
     // Harmony: chords change on the genome's chord rate, counted from the section start.
@@ -483,11 +512,28 @@ export class Engine {
     const fired = new Map<string, number>();
     const sectionLeft = palette.sectionBars * STEPS_PER_BAR - rel;
     let nei = false;
+    // Sensor events fire effects first, so a shake or a clap answers at once.
+    this.sensorFx(live);
+    // The end of a section sometimes stutters, brakes or stops into the next one.
+    if (rel % STEPS_PER_BAR === 12 && Math.floor(rel / STEPS_PER_BAR) === palette.sectionBars - 1) {
+      const rng = new Rng(hashInts(this.chain, 0x57a7));
+      const allowed = palette.effects ?? FX_IDS;
+      const endings = SECTION_ENDINGS.filter(([fx]) => allowed.includes(fx));
+      if (endings.length > 0 && rng.chance(0.3 + 0.5 * macros.variation)) {
+        const [ending] = endings[rng.weightedIndex(endings.map(([, w]) => w))] as [FxId, number];
+        this.queueFx(ending, 0.8, Math.min(4, FX_INFO[ending].steps));
+      }
+    }
     for (const runner of this.runners) {
       const spec = runner.spec;
       const params = {} as TrackParams;
       for (const p of TRACK_PARAMS) params[p] = clamp(spec.base[p] + off(trackDest(spec.slot, p)));
       let trigs = runner.step(rel, params, { fill, nei });
+      if (spec.role === 'fx') {
+        for (const f of trigs) if (f.trig.fx) this.queueFx(f.trig.fx, f.trig.vel, f.len);
+        this.trackState.set(spec.slot, { params, fired: 0 });
+        continue;
+      }
       nei = runner.lastCond;
       const realizer = this.realizers.get(spec.slot) as Realizer;
       // A drone whose note left the key restarts on the bar line.
@@ -529,8 +575,63 @@ export class Engine {
       this.pendingAccent = 0;
     }
 
+    const fx = this.emitFx(step);
+    if (fx) {
+      const lane = this.trackState.get('fx');
+      if (lane) lane.fired = fx.vel;
+    }
+
     matrix.advance(offsets, fired);
-    return capEvents(events, palette.maxEventsPerStep);
+    const out = capEvents(events, palette.maxEventsPerStep);
+    if (fx) out.push(fx);
+    return out;
+  }
+
+  private queueFx(fx: FxId, depth: number, steps: number): void {
+    const allowed = this.style.palette.effects ?? FX_IDS;
+    if (allowed.includes(fx)) this.fxQueue.push({ fx, depth, steps: Math.max(1, steps) });
+  }
+
+  /** Effects fired by sensor events: onsets, or the lid closing fast. */
+  private sensorFx(live: readonly ChannelState[]): void {
+    const triggers = this.genome?.fxTriggers ?? [];
+    for (const t of triggers) {
+      if (this.freshOnsets.has(t.channelId)) this.queueFx(t.fx, 0.9, FX_INFO[t.fx].steps);
+    }
+    for (const ch of live) {
+      if (ch.desc.kind !== 'lid.angle') continue;
+      if (!this.lidLatch && ch.features.trend < -0.6) {
+        this.lidLatch = true;
+        this.queueFx('tapeStop', 1, FX_INFO.tapeStop.steps);
+      } else if (ch.features.trend > -0.2) {
+        this.lidLatch = false;
+      }
+    }
+  }
+
+  /**
+   * Fires at most one queued effect: the first that is not cooling down and,
+   * if it takes over the mix, does not clash with one already playing.
+   */
+  private emitFx(step: number): NoteEvent | undefined {
+    const queue = this.fxQueue;
+    this.fxQueue = [];
+    for (const c of queue) {
+      const info = FX_INFO[c.fx];
+      if ((this.fxCooldown.get(c.fx) ?? -1) > step) continue;
+      if (info.exclusive && step < this.fxBusyUntil) continue;
+      this.fxCooldown.set(c.fx, step + c.steps + info.rest);
+      if (info.exclusive) this.fxBusyUntil = step + c.steps;
+      return {
+        part: 'fx',
+        role: 'fx',
+        step,
+        durSteps: c.steps,
+        vel: clamp(c.depth * (0.5 + this.globals.fx), 0.1, 1),
+        fx: c.fx,
+      };
+    }
+    return undefined;
   }
 
   private realize(

@@ -1,3 +1,4 @@
+import type { FxId } from '../fx/effects';
 import type { MappingRules } from '../mapping/rules';
 import type { TrackParam } from '../mod/params';
 import type { TrackRole } from '../seq/types';
@@ -285,6 +286,8 @@ export interface Palette {
   lfoPeriod: [number, number];
   /** Most notes that may start on one step. */
   maxEventsPerStep: number;
+  /** Effects this style may fire (default: all). */
+  effects?: readonly FxId[];
 }
 
 export interface FxConfig {

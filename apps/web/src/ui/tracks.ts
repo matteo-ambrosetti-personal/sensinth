@@ -1,6 +1,8 @@
 import {
+  FX_INFO,
   PARAM_INFO,
   conditionLabel,
+  type FxId,
   type EngineView,
   type TrackParam,
   type TrackView,
@@ -18,12 +20,15 @@ const ROLE_LABEL: Record<TrackView['role'], string> = {
   chords: 'Chords',
   pad: 'Pad',
   drone: 'Drone',
+  fx: 'Effects',
 };
 
 export interface TracksControls {
   analyser(slot: string): AnalyserNode | undefined;
   isMuted(slot: string): boolean;
   setMuted(slot: string, muted: boolean): void;
+  /** Triggered effects sounding now. */
+  fxNow(): readonly FxId[];
 }
 
 interface Colors {
@@ -40,7 +45,10 @@ interface Row {
   li: HTMLElement;
   meta: HTMLElement;
   mute: HTMLButtonElement;
-  scope: TrackScope;
+  scope: TrackScope | undefined;
+  /** The FX lane shows the effect playing instead of a scope. */
+  fxNow: HTMLElement | undefined;
+  fxLegend: HTMLElement | undefined;
   grid: HTMLCanvasElement;
   gridKey: string;
   gridLabel: string;
@@ -80,22 +88,46 @@ export class TracksView {
       row.mute.setAttribute('aria-pressed', String(this.controls.isMuted(t.slot)));
       row.li.classList.toggle('is-muted', this.controls.isMuted(t.slot));
       this.drawGrid(row, t, colors);
+      if (row.fxNow && row.fxLegend) this.drawFx(row.fxNow, row.fxLegend, t);
       for (const [p, cells] of row.params) {
         const v = t.params[p];
         cells.bar.style.transform = `scaleX(${v.toFixed(3)})`;
         cells.base.style.left = `${(t.base[p] * 100).toFixed(1)}%`;
         cells.value.textContent = String(Math.round(v * 100));
       }
-      if (scopes) row.scope.draw(this.controls.analyser(t.slot), colors);
+      if (scopes) row.scope?.draw(this.controls.analyser(t.slot), colors);
     }
+  }
+
+  private drawFx(now: HTMLElement, legend: HTMLElement, t: TrackView): void {
+    const playing = this.controls.fxNow();
+    const text =
+      playing.length > 0 ? playing.map((f) => FX_INFO[f].label).join(' + ') : 'No effect';
+    if (now.textContent !== text) now.textContent = text;
+    now.classList.toggle('is-on', playing.length > 0);
+    const used = [...new Set(t.trigs.flatMap((x) => (x?.fx ? [x.fx] : [])))];
+    const key = used.join(',');
+    if (legend.dataset.key === key) return;
+    legend.dataset.key = key;
+    legend.replaceChildren(
+      ...used.map((f) => {
+        const li = document.createElement('li');
+        li.title = FX_INFO[f].description;
+        li.innerHTML = `<span class="param-name"></span><span class="fx-name"></span>`;
+        (li.firstElementChild as HTMLElement).textContent = FX_INFO[f].short;
+        (li.lastElementChild as HTMLElement).textContent = FX_INFO[f].label;
+        return li;
+      }),
+    );
   }
 
   private rebuild(tracks: readonly TrackView[]): void {
     this.list.replaceChildren();
     this.rows.clear();
     for (const t of tracks) {
+      const fx = t.role === 'fx';
       const li = document.createElement('li');
-      li.className = 'track';
+      li.className = fx ? 'track is-fx' : 'track';
       li.dataset.slot = t.slot;
       li.innerHTML = `
         <div class="track-head">
@@ -104,7 +136,7 @@ export class TracksView {
           <span class="track-meta"></span>
           <button class="mute" type="button" aria-pressed="false">Mute</button>
         </div>
-        <canvas class="track-scope" aria-hidden="true"></canvas>
+        ${fx ? '<output class="track-fx-now" aria-live="off">No effect</output>' : '<canvas class="track-scope" aria-hidden="true"></canvas>'}
         <canvas class="track-grid" role="img"></canvas>
         <ul class="track-params"></ul>`;
       (li.querySelector('.track-name') as HTMLElement).textContent = t.label;
@@ -121,7 +153,7 @@ export class TracksView {
         { bar: HTMLElement; base: HTMLElement; value: HTMLElement }
       >();
       const ul = li.querySelector('.track-params') as HTMLElement;
-      for (const p of SHOWN) {
+      for (const p of fx ? [] : SHOWN) {
         const item = document.createElement('li');
         item.title = PARAM_INFO[p].label;
         item.innerHTML = `<span class="param-name">${PARAM_INFO[p].short}</span><div class="meter thin"><span></span><i class="meter-base" aria-hidden="true"></i></div><span class="param-value">–</span>`;
@@ -138,7 +170,11 @@ export class TracksView {
         li,
         meta: li.querySelector('.track-meta') as HTMLElement,
         mute,
-        scope: new TrackScope(li.querySelector('.track-scope') as HTMLCanvasElement),
+        scope: fx
+          ? undefined
+          : new TrackScope(li.querySelector('.track-scope') as HTMLCanvasElement),
+        fxNow: fx ? (li.querySelector('.track-fx-now') as HTMLElement) : undefined,
+        fxLegend: fx ? ul : undefined,
         grid: li.querySelector('.track-grid') as HTMLCanvasElement,
         gridKey: '',
         gridLabel: '',
@@ -248,6 +284,14 @@ function drawTrig(
   roundRect(ctx, x + pad + shift, y + pad, cell - 2 * pad, cell - 2 * pad, 3);
   ctx.fill();
   ctx.globalAlpha = 1;
+  if (trig.fx && cell >= 18) {
+    ctx.save();
+    ctx.fillStyle = c.inset;
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${cell >= 24 ? 8 : 7}px ${getComputedStyle(ctx.canvas).getPropertyValue('--font-mono') || 'monospace'}`;
+    ctx.fillText(FX_INFO[trig.fx].short, x + cell / 2 + shift, y + cell / 2 + 0.5, cell - 4);
+    ctx.restore();
+  }
   if (trig.cond.kind !== 'always' || trig.prob < 1) {
     ctx.setLineDash([2, 2]);
     ctx.strokeStyle = c.ink;

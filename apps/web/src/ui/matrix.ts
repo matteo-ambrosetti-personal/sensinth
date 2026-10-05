@@ -29,6 +29,7 @@ const GLOBAL: Record<string, string> = {
   'g.brightness': 'Brightness',
   'g.swing': 'Swing',
   'g.space': 'Space',
+  'g.fx': 'Effect depth',
 };
 
 interface Item {

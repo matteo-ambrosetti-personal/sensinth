@@ -5,6 +5,7 @@ import type { RenderTestOptions } from '../src/render-test';
 declare global {
   interface Window {
     sensinthStyles: string[];
+    sensinthEffects: string[];
     sensinthRender: (
       styleId: string,
       bars: number,

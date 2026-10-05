@@ -163,7 +163,13 @@ by construction, and the property-based tests check them against random and brok
    with approach notes only off the beat.
 4. **Progressions.** Chords follow the style's Markov table, weighted by the genome's bias per
    degree; tension favors unstable chords, low tension resolves home. Chords change on the
-   genome's chord rate (half a bar to four bars).
+   genome's chord rate (half a bar to four bars). Styles with **chord scales** (blues, jazz)
+   name their chords instead, each the tonic of its own scale (I7 over Mixolydian, ii∅ over
+   Locrian, V7♭9 over Phrygian dominant), and play them in forms: a 12-bar blues, a ii–V–I, a
+   turnaround. Brightness picks the form, tension may swap in a substitute (a tritone sub for
+   V7), and while a chord plays its scale is _the_ scale, so every rule here still holds.
+   Blue notes are the one exception: a blues or hip-hop lead may bend to the key's ♭3 or ♭5 on
+   a weak step, and then resolves by a semitone.
 5. **Slow things change slowly.** The mode follows brightness within the genome's chosen modes, at
    phrase starts, with hysteresis. The key moves around the circle of fifths at section starts
    when color has moved far, or jumps on a scene change.
@@ -185,11 +191,51 @@ A style is data (`Style` in `styles/schema.ts`): a name, a suggested tempo, effe
 - the **modes** to choose from, the progression table, chord rates and sizes, swing range, LFO
   range and the most notes per step.
 
-| Style    | Sound world                                                                       |
-| -------- | --------------------------------------------------------------------------------- |
-| Chiptune | Noise drums, laser zaps, triangle and pulse bass, pulse leads and arpeggios       |
-| Ambient  | Saw and hollow drones, saw and glass pads, FM bells and chimes, plucks, soft rims |
-| Lo-fi    | Dusty boom-bap drums, sub and FM bass, electric piano, kalimba, whistle, crackle  |
+| Style           | Sound world                                                                         |
+| --------------- | ----------------------------------------------------------------------------------- |
+| Free            | No style: instruments from every style, any mode, any structure, any effects preset |
+| Chiptune        | Noise drums, laser zaps, triangle and pulse bass, pulse leads and arpeggios         |
+| Ambient         | Saw and hollow drones, saw and glass pads, FM bells and chimes, plucks, soft rims   |
+| Lo-fi           | Dusty boom-bap drums, sub and FM bass, electric piano, kalimba, whistle, crackle    |
+| Hip-hop         | Punchy kick, clap, rolling hats, sliding 808, electric piano, pluck; blue notes     |
+| Jazz            | Swung ride and brushes, walking bass, comping piano or Rhodes, vibraphone, tenor    |
+| Blues           | Shuffle kit, walking bass, drawbar organ, barrelhouse piano, harmonica, guitar      |
+| Techno / acid   | Four on the floor, offbeat hats, acid bass with accents and slides, dub stabs       |
+| Synthwave       | Gated snare, eighth-note saw bass, supersaw pads, gliding lead, arpeggios           |
+| Drum & bass     | Breakbeats with ghosts and rolls, reese and sub bass, atmospheric pads              |
+| Minimal (Reich) | Marimba, piano and clarinet pulses on tracks at 1, 15/16 and 31/32 speed that phase |
+
+Machines can ask for a **rhythm** (four on the floor, offbeat, backbeat, breakbeat, walking bass,
+jazz ride, Charleston comping, pulse) instead of a Euclidean pattern, **blue notes** and
+**slides**. **Free** builds its palette from every other style's machines (ids prefixed by the
+style, like `techno.acid`) and lets the genome pick the effects preset per section.
+
+## Triggered effects (`core/src/fx`, `audio/src/fx/performance.ts`)
+
+Momentary effects on the whole mix are events too: a `NoteEvent` with role `fx`, an effect id,
+a depth and a length. Each style lists the effects that suit it. They come from three places:
+
+1. **Sensor events.** The genome links every fast sensor's onsets to an effect: a shake
+   stutters, a clap washes into reverb, a key press throws into the delay, a covered proximity
+   sensor dives the filter, a deep trackpad press crushes; other fast sensors get one picked by
+   the hash. The lid closing fast stops the tape.
+2. **Structure.** A riser in the bar before a new scene; a stutter, brake or tape stop at some
+   section ends.
+3. **The FX lane**, an Elektron-style track of sparse effect trigs with conditions and
+   probabilities, mutated every phrase like the others. It leaves the drastic stops to sensors
+   and section ends.
+
+At most one effect starts per step, the ones that take over the mix (stutter, tape stop, brake,
+crush, ring) never overlap, and each effect rests for a while after it plays. The matrix's
+`fx` destination scales their depth.
+
+The renderer plays them on a bus between the mix and the master filter: a high-pass (riser,
+with a noise swell) and a low-pass (dive) in series, a 16th-note gate, and parallel paths that
+take over from the dry mix — a looping delay that records one slice and repeats it (stutter), a
+delay line whose time grows so pitch and speed fall (tape stop, brake), a staircase wave-shaper
+(crush) and a sine ring modulator. The wash and the dub throw send the tracks into the reverb
+and the delay, and the throw raises the delay's feedback. Everything is scheduled on the audio
+clock with short fades, and muting the FX lane silences them.
 
 ## Audio (`packages/audio`)
 
@@ -201,9 +247,11 @@ A style is data (`Style` in `styles/schema.ts`): a name, a suggested tempo, effe
   note also carries its own params (timbre, decay, attack, tune). When a genome changes machines,
   the old chain fades out.
 - Instruments: band-limited pulse waves (timbre picks the width), basic oscillators with detune
-  and delayed vibrato, two-operator FM (timbre sets the index), detuned pads with an opening
-  filter, and parametric drum voices (kick, snare, clap, rim, hats, shaker, tom, perc, zap, noise)
-  in chip, lo-fi and soft flavours, reshaped by tune, decay and timbre.
+  and delayed vibrato, two-operator FM (timbre sets the index, optional tremolo), detuned pads
+  with an opening filter, a drawbar organ with a Leslie-like tremolo, and parametric drum voices
+  (kick, snare, clap, rim, hats, shaker, tom, perc, zap, noise, ride, crash, cowbell, brush) in
+  chip, lo-fi and soft flavours, reshaped by tune, decay and timbre. Pulse and oscillator voices
+  can glide between notes, open a per-note filter with accents (acid) and drop in pitch (808s).
 - Micro timing, retrigs, swing (a matrix destination) and humanized timing are applied when
   scheduling. Reverb (tail length per style) and the tempo-synced delay return follow `space`; a
   master low-pass follows `brightness`; vinyl crackle and tape wobble follow the dials.
@@ -228,7 +276,8 @@ with its audio time and the UI shows the one that is sounding.
 - **Tracks** (`ui/tracks.ts`): one row per track with its machine, length and speed, its own
   scope, a step grid (trigs shaded by velocity, p-lock dots, dashed outlines and labels for
   conditions and probabilities, retrig ticks, micro-timing offsets, the playhead), live param
-  meters with the genome's base value marked, and Mute.
+  meters with the genome's base value marked, and Mute. The FX lane shows its effects in the
+  cells, a legend, and the effect sounding now.
 - **Modulation** (`ui/matrix.ts`): every route grouped by source, with its amount and a centered
   bar showing what it adds right now.
 - Tempo, style, the dials, the sources and each sensor's value, level, activity, onsets and routes.

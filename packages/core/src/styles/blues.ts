@@ -204,6 +204,7 @@ export const blues: Style = {
     scales: [1],
     lfoPeriod: [32, 512],
     maxEventsPerStep: 12,
+    effects: ['wash', 'dubThrow', 'dive', 'tapeStop', 'brake'],
   },
   fx: {
     reverb: [0.08, 0.25],

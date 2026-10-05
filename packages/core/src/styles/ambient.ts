@@ -222,6 +222,7 @@ export const ambient: Style = {
     scales: [0.5, 0.75, 1, 1],
     lfoPeriod: [32, 512],
     maxEventsPerStep: 12,
+    effects: ['wash', 'dubThrow', 'sweep', 'dive', 'tapeStop'],
   },
   fx: {
     reverb: [0.25, 0.6],

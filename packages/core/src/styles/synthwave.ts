@@ -149,6 +149,7 @@ export const synthwave: Style = {
     scales: [1, 1, 0.5],
     lfoPeriod: [16, 384],
     maxEventsPerStep: 12,
+    effects: ['sweep', 'wash', 'gate', 'dive', 'dubThrow', 'stutter', 'tapeStop'],
   },
   fx: {
     reverb: [0.1, 0.35],

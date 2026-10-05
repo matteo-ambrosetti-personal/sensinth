@@ -183,6 +183,7 @@ export const techno: Style = {
     scales: [1, 1, 1, 0.5],
     lfoPeriod: [8, 256],
     maxEventsPerStep: 12,
+    effects: ['stutter', 'sweep', 'dive', 'dubThrow', 'gate', 'crush', 'ring', 'wash', 'tapeStop'],
   },
   fx: {
     reverb: [0.05, 0.25],

@@ -1,8 +1,9 @@
+import type { FxId } from '../fx/effects';
 import type { LfoSpec } from '../mod/lfo';
 import type { TrackParam, TrackParams } from '../mod/params';
 
-/** What a track plays. Decides how its trigs are turned into notes. */
-export type TrackRole = 'drum' | 'bass' | 'lead' | 'arp' | 'chords' | 'pad' | 'drone';
+/** What a track plays. Decides how its trigs are turned into notes. `fx` is the effects lane. */
+export type TrackRole = 'drum' | 'bass' | 'lead' | 'arp' | 'chords' | 'pad' | 'drone' | 'fx';
 
 export const TRACK_ROLES: readonly TrackRole[] = [
   'drum',
@@ -66,6 +67,8 @@ export interface Trig {
   retrig?: Retrig;
   /** Slide into this note from the previous one (machines with glide). */
   slide?: boolean;
+  /** FX lane: the effect this trig fires. */
+  fx?: FxId;
   /** Parameter locks for this trig only. */
   locks?: Partial<Record<TrackParam, number>>;
 }

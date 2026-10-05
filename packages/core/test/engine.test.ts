@@ -2,6 +2,8 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
   Engine,
+  FX_IDS,
+  FX_INFO,
   STEPS_PER_BAR,
   SimulatedSource,
   STYLES,
@@ -12,6 +14,8 @@ import {
   jazz,
   isChordTone,
   stepDuration,
+  techno,
+  type FxId,
   type NoteEvent,
   type SensorDescriptor,
   type SensorSample,
@@ -116,7 +120,7 @@ describe('Engine', () => {
       const played = run(style, 64);
 
       it('plays several tracks', () => {
-        const parts = new Set(played.map((p) => p.ev.part));
+        const parts = new Set(played.filter((p) => p.ev.role !== 'fx').map((p) => p.ev.part));
         expect(parts.size).toBeGreaterThanOrEqual(Math.min(4, style.palette.trackCount[0]));
         expect(played.length).toBeGreaterThan(100);
       });
@@ -146,7 +150,10 @@ describe('Engine', () => {
           expect(ev.durSteps).toBeGreaterThan(0);
           expect(ev.vel).toBeGreaterThan(0);
           expect(ev.vel).toBeLessThanOrEqual(1);
-          if (ev.midi !== undefined) {
+          if (ev.role === 'fx') {
+            expect(ev.fx).toBeDefined();
+            expect(ev.midi).toBeUndefined();
+          } else if (ev.midi !== undefined) {
             expect(Number.isInteger(ev.midi)).toBe(true);
             expect(range).toBeDefined();
             expect(ev.midi).toBeGreaterThanOrEqual((range as [number, number])[0]);
@@ -240,7 +247,7 @@ describe('Engine', () => {
     const events = run(chiptune, 4).map(({ ev }) => [
       ev.step,
       ev.part,
-      ev.midi ?? ev.voice,
+      ev.midi ?? ev.voice ?? ev.fx,
       Math.round(ev.vel * 1000) / 1000,
     ]);
     expect(events).toMatchSnapshot();
@@ -266,7 +273,9 @@ describe('Engine', () => {
               expect(m).toBeGreaterThanOrEqual(0);
               expect(m).toBeLessThanOrEqual(1);
             }
-            expect(events.length).toBeLessThanOrEqual(chiptune.palette.maxEventsPerStep);
+            const notes = events.filter((e) => e.role !== 'fx');
+            expect(notes.length).toBeLessThanOrEqual(chiptune.palette.maxEventsPerStep);
+            expect(events.length - notes.length).toBeLessThanOrEqual(1);
             for (const ev of events) {
               expect(Number.isFinite(ev.vel)).toBe(true);
               expect(Number.isFinite(ev.micro ?? 0)).toBe(true);
@@ -410,5 +419,64 @@ describe('Free mode', () => {
       for (const m of engine.trackMachines()) styles.add(m.machineId.split('.')[0] as string);
     }
     expect(styles.size).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe('Triggered effects', () => {
+  for (const style of STYLES) {
+    it(`fires ${style.name} effects one at a time, with cooldowns`, () => {
+      const fx = run(style, 64)
+        .map((p) => p.ev)
+        .filter((ev) => ev.role === 'fx');
+      expect(fx.length).toBeGreaterThan(0);
+      const steps = fx.map((ev) => ev.step);
+      expect(new Set(steps).size).toBe(steps.length);
+      const allowed = style.palette.effects ?? FX_IDS;
+      for (const ev of fx) expect(allowed).toContain(ev.fx);
+      const exclusive = fx.filter((ev) => FX_INFO[ev.fx as FxId].exclusive);
+      for (let i = 1; i < exclusive.length; i++) {
+        const prev = exclusive[i - 1] as NoteEvent;
+        expect((exclusive[i] as NoteEvent).step).toBeGreaterThanOrEqual(prev.step + prev.durSteps);
+      }
+      const last = new Map<FxId, NoteEvent>();
+      for (const ev of fx) {
+        const prev = last.get(ev.fx as FxId);
+        if (prev) {
+          const rest = FX_INFO[ev.fx as FxId].rest;
+          expect(ev.step).toBeGreaterThanOrEqual(prev.step + prev.durSteps + rest);
+        }
+        last.set(ev.fx as FxId, ev);
+      }
+    });
+  }
+
+  it('answers a shake with a stutter', () => {
+    const engine = new Engine({ style: chiptune });
+    engine.hub.announce({ id: 'acc', kind: 'motion.accel', label: 'Shake', range: [0, 20] });
+    engine.hub.announce({ id: 'lux', kind: 'light', label: 'Light', range: [0, 1000] });
+    const dt = stepDuration(chiptune.defaultTempo);
+    const shakes: number[] = [];
+    const stutters: number[] = [];
+    for (let step = 0; step < 32 * STEPS_PER_BAR; step++) {
+      const t = step * dt;
+      const shaking = step % (2 * STEPS_PER_BAR) >= 20 && step % (2 * STEPS_PER_BAR) < 24;
+      if (shaking && step % (2 * STEPS_PER_BAR) === 20) shakes.push(step);
+      engine.hub.push({ id: 'acc', t, v: shaking ? 18 : 0.5 });
+      engine.hub.push({ id: 'lux', t, v: 300 });
+      for (const ev of engine.tick(dt)) if (ev.fx === 'stutter') stutters.push(ev.step);
+    }
+    const answered = shakes.filter((s) => stutters.some((x) => x >= s && x < s + 6));
+    expect(answered.length).toBeGreaterThanOrEqual(shakes.length / 2);
+  });
+
+  it('shows the FX lane among the tracks', () => {
+    const engine = new Engine({ style: techno });
+    const sensors = sim();
+    for (const d of sensors.descriptors) engine.hub.announce(d);
+    engine.hub.pushAll(sensors.sampleAt(0));
+    engine.tick(0.1);
+    const lane = engine.view().tracks.find((t) => t.role === 'fx');
+    expect(lane?.label).toBe('FX lane');
+    expect(engine.trackMachines().some((m) => m.slot === lane?.slot)).toBe(false);
   });
 });

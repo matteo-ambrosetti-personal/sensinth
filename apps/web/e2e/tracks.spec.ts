@@ -24,7 +24,7 @@ async function startWithSimulatedSensors(page: Page): Promise<void> {
 
 test('each track shows its own scope, step grid, params and mute', async ({ page }) => {
   await startWithSimulatedSensors(page);
-  const rows = page.locator('#tracks .track');
+  const rows = page.locator('#tracks .track:not(.is-fx)');
   await expect(rows.first()).toBeVisible({ timeout: 8000 });
   expect(await rows.count()).toBeGreaterThanOrEqual(4);
   await expect(rows.first().locator('.track-grid')).toHaveAttribute(
@@ -61,6 +61,18 @@ test('each track shows its own scope, step grid, params and mute', async ({ page
   await expect(track).toHaveClass(/is-muted/);
   await track.locator('.mute').click();
   await expect(track.locator('.mute')).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('the FX lane shows its effects and fires them', async ({ page }) => {
+  await startWithSimulatedSensors(page);
+  const lane = page.locator('#tracks .track.is-fx');
+  await expect(lane).toBeVisible({ timeout: 8000 });
+  await expect(lane.locator('.track-name')).toHaveText('FX lane');
+  await expect(lane.locator('.track-grid')).toHaveAttribute('aria-label', /\d+ trigs/);
+  // Sensor events, the lane and the song's structure fire effects within a few bars.
+  await expect(lane.locator('.track-fx-now')).toHaveClass(/is-on/, { timeout: 20000 });
+  await lane.locator('.mute').click();
+  await expect(lane.locator('.mute')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('the modulation matrix routes every sensor at least twice', async ({ page }) => {

@@ -16,6 +16,24 @@ test('every style renders audible, unclipped, finite audio', async ({ page }) =>
   }
 });
 
+test('every triggered effect stays finite and below 0 dBFS', async ({ page }) => {
+  test.setTimeout(240_000);
+  await page.goto('/render-test.html');
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
+  const effects = await page.evaluate(() => window.sensinthEffects);
+  expect(effects.length).toBeGreaterThanOrEqual(10);
+  for (const fx of effects) {
+    const stats = await page.evaluate(
+      (f) => window.sensinthRender('techno', 6, { fx: f as never }),
+      fx,
+    );
+    expect(stats.fx, `${fx}: fired`).toBeGreaterThanOrEqual(3);
+    expect(stats.nonFinite, `${fx}: NaN/Infinity samples`).toBe(0);
+    expect(stats.rms, `${fx}: not silent`).toBeGreaterThan(0.01);
+    expect(stats.peak, `${fx}: below 0 dBFS`).toBeLessThan(1);
+  }
+});
+
 test('muting tracks silences exactly them', async ({ page }) => {
   await page.goto('/render-test.html');
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');

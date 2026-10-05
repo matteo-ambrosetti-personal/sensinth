@@ -47,7 +47,7 @@ remaining check.
 - **Mac:** installable web app; Pointer & keys source; WebKit (Safari engine) browser tests in CI.
 
 Lo-fi chords stay diatonic: a borrowed iv chord would break the "every note in key" guarantee and
-needs a notion of temporary scales first.
+needs a notion of temporary scales first (Phase 3.6 added them, as chord scales).
 
 ## Phase 3.5: sensor-driven tracks (done)
 
@@ -75,6 +75,36 @@ Tests check that a 2% difference in one sensor changes most bars, that frozen se
 a phrase over 128 bars, that there is silence without sensors, determinism, and the harmony rules
 for every palette.
 
+## Phase 3.6: more styles, Free mode, triggered effects (done)
+
+- **Play** sits in the scope's corner, so the trace runs unbroken.
+- **Seven new styles:** Hip-hop, Jazz, Blues, Techno / acid, Synthwave, Drum & bass and Minimal
+  (Reich-like phasing).
+- **Chord-scale harmony:** a chord can bring its own scale (V7 over Mixolydian, ii∅ over Locrian,
+  V7♭9 over Phrygian dominant, …), so blues and jazz leave the key while every note still fits
+  the chord that plays. Forms (12-bar blues, ii–V–I, turnarounds) are picked by brightness, with
+  tritone substitutions under tension. Blue notes: blues and hip-hop leads may bend to ♭3 or ♭5
+  on weak steps and resolve by a semitone.
+- **New sound abilities:** glide (acid slides, 808s), a per-note filter envelope with accents, a
+  pitch envelope, a drawbar organ, tremolo, and ride, crash, cowbell and brush drum voices.
+  Rhythm templates: four on the floor, offbeat, backbeat, breakbeats, walking bass, the jazz ride
+  figure, Charleston comping, pulses and slides.
+- **Free mode:** no style; the sensors pick instruments from every style, any mode, any structure
+  and the effects preset, while harmony and the grid hold.
+- **Triggered effects:** stutter, tape stop, vinyl brake, riser, filter dive, reverb wash, dub
+  throw, bit crush, gate chop and ring mod on the whole mix, fired by sensor events (a shake
+  stutters, a clap washes, the lid closing stops the tape), by the song's structure (a riser into
+  a new scene, a stutter or brake at a section's end) and by an Elektron-style FX lane.
+
+## Next: the Flow page and every sensor
+
+- A **Flow** page drawing each sensor's signal, before and after processing, on its way through
+  the routings to the tracks, the mix and the effects.
+- **Every sensor** on a Mac (a native app reading the lid angle, ambient light, battery,
+  temperatures and more; the accelerometer and gyroscope as an opt-in) and on Android phones
+  (every hardware sensor, battery, thermal and Wi-Fi signals), plus game controllers, MIDI
+  controllers and trackpad pressure in the browser.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /
@@ -90,7 +120,7 @@ sensors directly, and starts on boot.
 ## Later
 
 Recording the music to an audio file and sharing it, arrangement changes (breaks, builds),
-borrowed chords, MIDI out, more styles, editing a genome by hand (locking a track you like), playing with the screen off (a foreground service
+MIDI out, editing a genome by hand (locking a track you like), playing with the screen off (a foreground service
 in the Android app), a mapping editor, several devices playing in sync.
 
 ## Known limits of phone browsers
