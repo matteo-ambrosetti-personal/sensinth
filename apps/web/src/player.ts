@@ -1,5 +1,6 @@
 import { LookaheadScheduler, Renderer, type BusId } from '@sensinth/audio';
 import {
+  EVENT_LATENCY,
   Engine,
   SensorHub,
   type EngineSnapshot,
@@ -15,11 +16,17 @@ import { ScreenWakeLock } from './wakeLock';
 const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
 /** Views kept for steps scheduled ahead of the audio clock. */
 const MAX_QUEUED_VIEWS = 32;
+/** Seconds from pressing Play to the first step. */
+const START_DELAY = 0.08;
 
 /**
  * Wires sensors, the engine, the renderer and the clock together. Every
  * press of Play starts a new piece; the sensors pick everything in it. With
  * no live sensor, nothing plays.
+ *
+ * In deterministic mode the seed picks the tracks instead, the inputs are
+ * read on the music's own clock from the moment Play is pressed, and every
+ * press plays its note at its own time. It plays with no sensor too.
  */
 export class Player {
   readonly hub = new SensorHub();
@@ -40,6 +47,15 @@ export class Player {
   private current: EngineView | undefined;
   /** Pitch class to start each new piece in, e.g. from the current place. */
   keyHint: () => number | undefined = () => undefined;
+  /** Deterministic mode and its seed, applied at the next Play. */
+  private seeded: { seed: number } | undefined;
+  /**
+   * Called just before a piece starts, with the sensor-clock time of its
+   * first step: deterministic mode rewinds replays to it.
+   */
+  beforeStart: (origin: number) => void = () => {};
+  /** Notes played by presses and onsets since Play. */
+  eventNotes = 0;
 
   constructor(style: Style, bpm: number) {
     this.style = style;
@@ -99,15 +115,30 @@ export class Player {
     return this.current;
   }
 
+  /** Turns deterministic mode on with a seed, or off; takes effect at the next Play. */
+  setDeterministic(seed: number | undefined): void {
+    this.seeded = seed === undefined ? undefined : { seed };
+  }
+
+  get deterministic(): { seed: number } | undefined {
+    return this.seeded;
+  }
+
   /** Must be called from a user gesture (browsers block audio otherwise). */
   async start(): Promise<void> {
     if (this.playing) return;
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     await ctx.resume();
     this.ctx = ctx;
-    this.engine = this.newEngine();
+    // Step 0 sounds START_DELAY from now, on both clocks.
+    const audio0 = ctx.currentTime + START_DELAY;
+    const origin = nowSeconds() + START_DELAY;
+    if (this.seeded) this.beforeStart(origin);
+    this.engine.dispose();
+    this.engine = this.newEngine(this.seeded ? origin : undefined);
     this.views = [];
     this.current = undefined;
+    this.eventNotes = 0;
 
     this.scope = ctx.createAnalyser();
     this.scope.fftSize = 2048;
@@ -118,6 +149,15 @@ export class Player {
     renderer.setTempo(this.bpm);
     for (const slot of this.muted) renderer.setMuted(slot, true);
     this.renderer = renderer;
+    // Presses and onsets play at their own time, a moment later.
+    this.engine.onEventNotes = (notes) => {
+      for (const n of notes) {
+        renderer.playAt(n.note, audio0 + n.time + EVENT_LATENCY);
+        if (n.note.voice)
+          this.noteHits([n.note], audio0 + n.time + EVENT_LATENCY - ctx.currentTime);
+      }
+      this.eventNotes += notes.length;
+    };
 
     let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
@@ -150,13 +190,18 @@ export class Player {
       this.noteHits(events, time - ctx.currentTime);
     };
     this.scheduler = scheduler;
-    scheduler.start(this.bpm);
+    scheduler.start(this.bpm, START_DELAY);
     void this.wakeLock.enable();
   }
 
   stop(): void {
     this.scheduler?.stop();
     this.scheduler = undefined;
+    // A deterministic engine keeps a log of the sensors: let it go.
+    if (this.engine.seed !== undefined) {
+      this.engine.dispose();
+      this.engine = this.newEngine();
+    }
     this.renderer?.dispose();
     this.renderer = undefined;
     this.views = [];
@@ -193,16 +238,21 @@ export class Player {
     if (this.playing) this.engine.setStyle(style);
     else {
       this.style = style;
+      this.engine.dispose();
       this.engine = this.newEngine();
     }
   }
 
-  private newEngine(): Engine {
-    const keyRoot = this.keyHint();
+  /** A sensor-driven engine, or a deterministic one starting at `origin`. */
+  private newEngine(origin?: number): Engine {
+    const seeded = origin !== undefined ? this.seeded : undefined;
+    // The seed alone picks the key in deterministic mode, not the place.
+    const keyRoot = seeded ? undefined : this.keyHint();
     const engine = new Engine({
       style: this.style,
       hub: this.hub,
       ...(keyRoot !== undefined ? { keyRoot } : {}),
+      ...(seeded && origin !== undefined ? { deterministic: { seed: seeded.seed, origin } } : {}),
     });
     engine.router.setSolo(this.soloId);
     return engine;

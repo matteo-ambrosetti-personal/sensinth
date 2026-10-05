@@ -15,7 +15,7 @@ export { PadInstrument } from './instruments/pad';
 export { TonalInstrument } from './instruments/tonal';
 export type { Instrument } from './instruments/types';
 export { createCrackleBuffer, createNoiseBuffer } from './noise';
-export { analyze, encodeWav, renderOffline } from './offline';
+export { SCRIPT_KEYS, analyze, encodeWav, renderOffline } from './offline';
 export type { OfflineRenderOptions, RenderStats, SensorScript } from './offline';
 export * from './params';
 export { Renderer, type BusId, type RenderState, type TrackMachine } from './renderer';

@@ -5,10 +5,10 @@ import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
 import { Fingerprinter, fingerprintChange, jitterOf, type Fingerprint } from './genome/fingerprint';
 import { buildGenome, firstChain, nextChain, type FxTrigger, type Genome } from './genome/genome';
 import { mutatePhrase } from './genome/mutate';
-import { MACROS, type Macros, type Triggers } from './mapping/macros';
+import { MACRO_INFO, MACROS, noTriggers, type Macros, type Triggers } from './mapping/macros';
 import { Router } from './mapping/router';
 import { DEFAULT_MAPPING, mergeRules } from './mapping/rules';
-import { clamp, lerp, mod } from './math';
+import { clamp, lerp, mod, onePoleAlpha } from './math';
 import {
   ModMatrix,
   globalDest,
@@ -19,10 +19,14 @@ import {
 } from './mod/matrix';
 import { TRACK_PARAMS, type GlobalParams, type TrackParams } from './mod/params';
 import { Rng, hashInts } from './random';
+import { buildSeededGenome, seededChain, seededSensorRoutes } from './seeded/genome';
+import { InputModel, type InputChannel } from './seeded/inputs';
+import { eventParams, eventPitch, eventVoices, type EventVoice } from './seeded/voices';
 import { Realizer, type HarmonyContext } from './seq/realize';
 import { TrackRunner, type FiredTrig } from './seq/runner';
 import type { TrackRole, TrackSpec, Trig } from './seq/types';
 import { SensorHub, type ChannelState } from './sensors/hub';
+import type { SensorEvent } from './sensors/types';
 import type { FxConfig, Machine, Style } from './styles/schema';
 import type { Chord } from './theory/chords';
 import type { ModeId, Scale } from './theory/scales';
@@ -35,7 +39,38 @@ export interface EngineOptions {
   hub?: SensorHub;
   /** Key (pitch class 0..11) to start in, e.g. from the current place. */
   keyRoot?: number;
+  /**
+   * Deterministic mode: the seed writes every track and section, and every
+   * input has a fixed, proportional effect (see `DeterministicOptions`).
+   */
+  deterministic?: DeterministicOptions;
 }
+
+/**
+ * Deterministic mode. The tracks, patterns and harmony settings of every
+ * section come from the seed. Inputs are read at musical time from a log of
+ * what the sensors did, so the same seed and the same gestures at the same
+ * times give the same music, and gestures a little off give music a little
+ * off. Presses (keys, MIDI keys, buttons) and onsets play their own notes at
+ * their own time. It plays with no sensor at all.
+ */
+export interface DeterministicOptions {
+  seed: number;
+  /** Sensor-clock seconds at which step 0 starts (default 0). */
+  origin?: number;
+  /** Seconds behind the music at which inputs are read, so every reading has arrived (default 0.2). */
+  inputDelay?: number;
+}
+
+/** A note played by a press or an onset, at the time it happened. */
+export interface EventNote {
+  note: NoteEvent;
+  /** Seconds after the origin at which the event happened. */
+  time: number;
+}
+
+/** Seconds from a press to its note: short enough to feel played, long enough to schedule. */
+export const EVENT_LATENCY = 0.06;
 
 /** Why the pattern was last rewritten. */
 export type RebuildReason = 'start' | 'section' | 'scene' | 'style' | 'resume';
@@ -59,6 +94,8 @@ export interface EngineSnapshot {
   phrase: number;
   /** Short hex id of the current genome. */
   genome: string;
+  /** The seed, in deterministic mode. */
+  seed?: number;
 }
 
 export interface TrackView {
@@ -89,11 +126,61 @@ export interface EngineView {
   swing: number;
   rebuild: { reason: RebuildReason; channel?: string; step: number };
   /** Where the key came from. */
-  keySource: 'place' | 'sensors' | 'colour';
+  keySource: 'place' | 'sensors' | 'colour' | 'seed';
   /** Changes made at the latest phrase start. */
   mutations: readonly string[];
   /** Which effect each sensor's events fire. */
   fxTriggers: readonly FxTrigger[];
+}
+
+/** Deterministic mode's fixed stand-in for `variation`: how often fills and endings come. */
+const DET_VARIATION = 0.3;
+/** Deterministic mode's phrase mutation amount. */
+const DET_MUTATION = 0.4;
+/** How far energy and variation move every rhythmic track's trig probability. */
+const DET_DENSITY = { base: -0.12, energy: 0.6, variation: 0.5 };
+const RHYTHMIC: ReadonlySet<string> = new Set(['drum', 'bass', 'lead', 'arp', 'chords']);
+/** Weight of a press channel's rate on `energy`. */
+const PRESS_ENERGY = 0.7;
+/** Steps of harmony remembered, to place event notes. */
+const DET_HISTORY = 512;
+const DEFAULT_INPUT_DELAY = 0.2;
+
+/** Deterministic mode's state. */
+interface Seeded {
+  seed: number;
+  origin: number;
+  delay: number;
+  model: InputModel;
+  /** Musical seconds at the start of the next step. */
+  clock: number;
+  history: StepRecord[];
+  /** Events whose step has not been played yet. */
+  pending: SensorEvent[];
+  /** Channels with routes in this section. */
+  routed: Set<string>;
+  macros: Macros | undefined;
+  voices: { ev?: EventVoice; hit?: EventVoice };
+}
+
+/** One played step, to realize event notes against. */
+interface StepRecord {
+  step: number;
+  start: number;
+  seconds: number;
+  scale: Scale;
+  chord: Chord;
+  energy: number;
+}
+
+/** A sensor's values as matrix sources. */
+interface SensorValues {
+  id: string;
+  level: number;
+  activity: number;
+  trend: number;
+  onset: number;
+  jitter?: number;
 }
 
 /** Fingerprint distance that counts as a new scene. */
@@ -143,7 +230,8 @@ export class Engine {
   readonly router: Router;
   private style: Style;
   private pendingStyle: Style | undefined;
-  private readonly seed: number;
+  /** Salt for the hash chain in the sensor-driven mode. */
+  private readonly seed0: number;
   private readonly keyRoot: number | undefined;
   private readonly fingerprinter = new Fingerprinter();
   private genome: Genome | undefined;
@@ -179,13 +267,46 @@ export class Engine {
   private mutations: string[] = [];
   /** Increments whenever tracks or machines are rebuilt. */
   genomeVersion = 0;
+  /** Deterministic mode: receives the notes of presses and onsets as they happen. */
+  onEventNotes: ((notes: EventNote[]) => void) | undefined;
+  private readonly det: Seeded | undefined;
 
   constructor(opts: EngineOptions) {
     this.style = opts.style;
-    this.seed = opts.seed ?? 0;
+    this.seed0 = opts.seed ?? 0;
     this.keyRoot = opts.keyRoot;
     this.hub = opts.hub ?? new SensorHub();
     this.router = new Router(this.hub, mergeRules(DEFAULT_MAPPING, opts.style.mapping));
+    const d = opts.deterministic;
+    if (d) {
+      const seed = Math.floor(d.seed) >>> 0;
+      const origin = d.origin ?? 0;
+      const model = new InputModel(this.hub, { origin });
+      this.det = {
+        seed,
+        origin,
+        delay: d.inputDelay ?? DEFAULT_INPUT_DELAY,
+        model,
+        clock: 0,
+        history: [],
+        pending: [],
+        routed: new Set(),
+        macros: undefined,
+        voices: eventVoices(opts.style.palette, seed),
+      };
+      model.onEvent = (e) => this.onSensorEvent(e);
+    }
+  }
+
+  /** The seed in deterministic mode, else undefined. */
+  get seed(): number | undefined {
+    return this.det?.seed;
+  }
+
+  /** Stops listening to the hub (deterministic mode keeps a log of it). */
+  dispose(): void {
+    this.det?.model.dispose();
+    this.onEventNotes = undefined;
   }
 
   get currentStyle(): Style {
@@ -222,19 +343,24 @@ export class Engine {
     return this.genome?.fx ?? this.style.fx;
   }
 
-  /** Every track's slot and machine, for the renderer. */
+  /** Every track's slot and machine, for the renderer, plus the event voices in deterministic mode. */
   trackMachines(): { slot: string; machineId: string; machine: Machine }[] {
-    return (this.genome?.tracks ?? [])
+    const tracks = (this.genome?.tracks ?? [])
       .filter((t) => t.role !== 'fx')
       .map((t) => ({
         slot: t.slot,
         machineId: t.machine,
         machine: this.style.palette.machines[t.machine] as Machine,
       }));
+    const voices = this.det?.voices;
+    if (voices?.ev) tracks.push(voices.ev);
+    if (voices?.hit) tracks.push(voices.hit);
+    return tracks;
   }
 
   /** Generates the notes for the next step. `stepSeconds` drives macro smoothing. */
   tick(stepSeconds: number): NoteEvent[] {
+    if (this.det) return this.tickSeeded(this.det, stepSeconds);
     const step = this.step++;
     const { macros, triggers } = this.router.update(stepSeconds);
     const live = this.liveChannels();
@@ -260,7 +386,173 @@ export class Engine {
     } else {
       this.boundaries(step, live, macros);
     }
-    return this.play(step, live, macros, triggers);
+    const values: SensorValues[] = live.map((ch) => ({
+      id: ch.desc.id,
+      level: ch.features.level,
+      activity: ch.features.activity,
+      trend: ch.features.trend,
+      onset: this.onsetEnv.get(ch.desc.id) ?? 0,
+      jitter: 2 * jitterOf(ch.raw) - 1,
+    }));
+    // Sensor events fire effects first, so a shake or a clap answers at once.
+    this.sensorFx(live);
+    return this.play(step, values, macros, triggers);
+  }
+
+  /** A step of deterministic mode: inputs read at musical time, structure from the seed. */
+  private tickSeeded(det: Seeded, stepSeconds: number): NoteEvent[] {
+    const step = this.step++;
+    const start = det.clock;
+    det.clock += stepSeconds;
+    const solo = this.router.solo;
+    const inputs = det.model
+      .evaluate(det.origin + start - det.delay)
+      .filter((c) => solo === undefined || c.id === solo);
+    const macros = this.seededMacros(det, inputs, stepSeconds);
+    this.waiting = false;
+    if (step === 0) {
+      this.rebuild(step, undefined, macros, 'start');
+    } else if (step % STEPS_PER_BAR === 0 && this.pendingStyle) {
+      this.style = this.pendingStyle;
+      this.pendingStyle = undefined;
+      this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
+      det.voices = eventVoices(this.style.palette, det.seed);
+      this.rebuild(step, undefined, macros, 'style');
+    } else {
+      this.seededBoundaries(det, step, macros);
+    }
+    // A sensor gets its routes for the section the first time it is heard in it.
+    const tracks = this.genome?.tracks ?? [];
+    for (const ch of inputs) {
+      if (det.routed.has(ch.id)) continue;
+      det.routed.add(ch.id);
+      this.matrix?.addRoutes(seededSensorRoutes(det.seed, this.section, ch, tracks));
+    }
+    const values: SensorValues[] = inputs.map((c) => ({
+      id: c.id,
+      level: c.level,
+      activity: c.activity,
+      trend: c.trend,
+      onset: c.onset,
+    }));
+    const events = this.play(step, values, macros, noTriggers());
+    const h = this.harmony;
+    if (h) {
+      det.history.push({
+        step,
+        start,
+        seconds: stepSeconds,
+        scale: h.scale,
+        chord: h.chord,
+        energy: macros.energy,
+      });
+      if (det.history.length > DET_HISTORY) det.history.shift();
+    }
+    this.flushEvents(det);
+    return events;
+  }
+
+  /**
+   * Macros from the router's rules, read from the deterministic inputs and
+   * glided per step. The dials show them too.
+   */
+  private seededMacros(det: Seeded, inputs: readonly InputChannel[], stepSeconds: number): Macros {
+    const byId = new Map(inputs.map((c) => [c.id, c]));
+    const sum = {} as Record<string, number>;
+    const weight = {} as Record<string, number>;
+    for (const r of this.router.getRoutes().macros) {
+      const ch = byId.get(r.channelId);
+      if (!ch) continue;
+      let v =
+        r.feature === 'level'
+          ? ch.level
+          : r.feature === 'activity'
+            ? ch.activity
+            : 0.5 + 0.5 * ch.trend;
+      if (r.invert) v = 1 - v;
+      sum[r.macro] = (sum[r.macro] ?? 0) + v * r.weight;
+      weight[r.macro] = (weight[r.macro] ?? 0) + r.weight;
+    }
+    // Pressing faster makes the music busier.
+    for (const ch of inputs) {
+      if (!ch.presses) continue;
+      sum.energy = (sum.energy ?? 0) + ch.activity * PRESS_ENERGY;
+      weight.energy = (weight.energy ?? 0) + PRESS_ENERGY;
+    }
+    const prev = det.macros;
+    const out = {} as Macros;
+    for (const id of MACROS) {
+      const w = weight[id] ?? 0;
+      const target = w > 0 ? (sum[id] ?? 0) / w : MACRO_INFO[id].fallback;
+      this.router.targets[id] = target;
+      out[id] = prev
+        ? prev[id] + (target - prev[id]) * onePoleAlpha(stepSeconds, MACRO_INFO[id].slewTau)
+        : target;
+    }
+    det.macros = out;
+    Object.assign(this.router.macros, out);
+    return out;
+  }
+
+  /** Section starts and phrase mutations, from the seed alone. */
+  private seededBoundaries(det: Seeded, step: number, macros: Readonly<Macros>): void {
+    if (step % STEPS_PER_BAR !== 0) return;
+    const { palette } = this.style;
+    const barsIn = Math.floor((step - this.sectionStart) / STEPS_PER_BAR);
+    if (barsIn >= palette.sectionBars) {
+      this.section++;
+      this.rebuild(step, undefined, macros, 'section');
+    } else if (barsIn > 0 && barsIn % Math.max(1, palette.phraseBars) === 0 && this.genome) {
+      const rng = new Rng(hashInts(det.seed, this.section, barsIn, 0x707));
+      this.mutations = mutatePhrase(this.genome, rng, DET_MUTATION);
+      this.harmony?.onPhraseStart(this.harmonyInputs(macros));
+    }
+  }
+
+  private onSensorEvent(e: SensorEvent): void {
+    const det = this.det;
+    if (!det || !(e.t >= det.origin)) return;
+    det.pending.push(e);
+    this.flushEvents(det);
+  }
+
+  /** Turns events whose step has played into notes, realized against that step's harmony. */
+  private flushEvents(det: Seeded): void {
+    if (det.pending.length === 0) return;
+    const ready: EventNote[] = [];
+    const waiting: SensorEvent[] = [];
+    for (const e of det.pending) {
+      const time = e.t - det.origin;
+      if (time >= det.clock) {
+        waiting.push(e);
+        continue;
+      }
+      const rec = recordAt(det.history, time);
+      const note = rec ? this.eventNote(det, e, rec) : undefined;
+      if (note) ready.push({ note, time });
+    }
+    det.pending = waiting;
+    if (ready.length === 0) return;
+    ready.sort((a, b) => a.time - b.time);
+    this.onEventNotes?.(ready);
+  }
+
+  private eventNote(det: Seeded, e: SensorEvent, rec: StepRecord): NoteEvent | undefined {
+    const onset = e.kind === 'onset';
+    const voice = onset ? (det.voices.hit ?? det.voices.ev) : det.voices.ev;
+    if (!voice) return undefined;
+    const { machine, slot } = voice;
+    const base = {
+      part: slot,
+      role: machine.role,
+      step: rec.step,
+      vel: clamp(e.velocity * (0.7 + 0.4 * rec.energy), 0.05, 1),
+      params: eventParams(slot),
+    };
+    if (machine.patch.type === 'drum') return { ...base, durSteps: 1, voice: machine.patch.voice };
+    const range = machine.range ?? [48, 84];
+    const midi = eventPitch(e, rec.scale, rec.chord, onset ? [range[0], range[0] + 12] : range);
+    return { ...base, durSteps: onset ? 1 : 2, midi };
   }
 
   snapshot(): EngineSnapshot {
@@ -285,6 +577,7 @@ export class Engine {
       section: this.section,
       phrase: Math.floor(rel / STEPS_PER_BAR / phraseBars),
       genome: (this.genome?.chain ?? 0).toString(16).padStart(8, '0').slice(0, 6),
+      ...(this.det ? { seed: this.det.seed } : {}),
     };
   }
 
@@ -380,17 +673,31 @@ export class Engine {
     }
   }
 
+  /** Writes a new genome: from the sensors' fingerprint, or from the seed in deterministic mode. */
   private rebuild(
     step: number,
-    fp: Fingerprint,
+    fp: Fingerprint | undefined,
     macros: Readonly<Macros>,
     reason: RebuildReason,
   ): void {
     const first = this.genome === undefined;
-    this.chain = first ? firstChain(this.seed, fp) : nextChain(this.chain, fp, this.section);
-    const genome = buildGenome(this.style, fp, this.chain, this.section, macros);
+    const det = this.det;
+    let genome: Genome;
+    if (det || !fp) {
+      const seed = det?.seed ?? this.seed0;
+      this.chain = seededChain(seed, this.section);
+      genome = buildSeededGenome(this.style, seed, this.section);
+    } else {
+      this.chain = first ? firstChain(this.seed0, fp) : nextChain(this.chain, fp, this.section);
+      genome = buildGenome(this.style, fp, this.chain, this.section, macros);
+    }
     this.genome = genome;
-    this.matrix = new ModMatrix(genome.matrix);
+    // Deterministic mode adds sensor routes to the matrix only, so phrase
+    // mutations (which pick among the genome's routes) never depend on them.
+    this.matrix = new ModMatrix(
+      det ? { ...genome.matrix, routes: [...genome.matrix.routes] } : genome.matrix,
+    );
+    det?.routed.clear();
     this.runners = genome.tracks.map(
       (t) => new TrackRunner(t, new Rng(hashInts(this.chain, Number(t.slot.slice(1)), 0x5eed))),
     );
@@ -398,7 +705,7 @@ export class Engine {
       genome.tracks.map((t) => [t.slot, this.realizers.get(t.slot) ?? new Realizer()]),
     );
     this.sectionStart = step;
-    this.anchor = fp;
+    if (fp) this.anchor = fp;
     this.farSteps = 0;
     this.mutations = [];
     this.genomeVersion++;
@@ -407,8 +714,9 @@ export class Engine {
 
     const inputs = this.harmonyInputs(macros);
     if (!this.harmony) {
-      const root = this.keyRoot ?? hashInts(fp.coarseHash, 12) % 12;
-      this.keySource = this.keyRoot !== undefined ? 'place' : 'sensors';
+      const root =
+        this.keyRoot ?? (det ? hashInts(det.seed, 0x6b3) : hashInts(fp?.coarseHash ?? 0, 12)) % 12;
+      this.keySource = this.keyRoot !== undefined ? 'place' : det ? 'seed' : 'sensors';
       this.harmony = new Harmony(
         this.style.palette,
         new Rng(hashInts(this.chain, 0x4a11)),
@@ -419,8 +727,9 @@ export class Engine {
       return;
     }
     const harmony = this.harmony;
+    if (det) harmony.reseed(hashInts(det.seed, this.section, 0x5ec));
     harmony.setGenes(this.style.palette, genome.harmony, inputs);
-    if (reason === 'scene' || reason === 'resume') {
+    if (fp && (reason === 'scene' || reason === 'resume')) {
       // A new scene starts in a new key: next to the place's key, or one the sensors pick.
       const root =
         this.keyRoot !== undefined
@@ -447,7 +756,7 @@ export class Engine {
 
   private play(
     step: number,
-    live: readonly ChannelState[],
+    sensors: readonly SensorValues[],
     macros: Readonly<Macros>,
     triggers: Readonly<Triggers>,
   ): NoteEvent[] {
@@ -461,14 +770,12 @@ export class Engine {
 
     // External sources for the matrix.
     matrix.clearExternal();
-    for (const ch of live) {
-      const id = ch.desc.id;
-      const f = ch.features;
-      matrix.setSource(sensorSource(id, 'level'), 2 * f.level - 1);
-      matrix.setSource(sensorSource(id, 'activity'), f.activity);
-      matrix.setSource(sensorSource(id, 'trend'), f.trend);
-      matrix.setSource(sensorSource(id, 'onset'), this.onsetEnv.get(id) ?? 0);
-      matrix.setSource(sensorSource(id, 'jitter'), 2 * jitterOf(ch.raw) - 1);
+    for (const s of sensors) {
+      matrix.setSource(sensorSource(s.id, 'level'), 2 * s.level - 1);
+      matrix.setSource(sensorSource(s.id, 'activity'), s.activity);
+      matrix.setSource(sensorSource(s.id, 'trend'), s.trend);
+      matrix.setSource(sensorSource(s.id, 'onset'), s.onset);
+      if (s.jitter !== undefined) matrix.setSource(sensorSource(s.id, 'jitter'), s.jitter);
     }
     for (const m of MACROS) matrix.setSource(macroSource(m), 2 * macros[m] - 1);
     const offsets = matrix.evaluate();
@@ -484,6 +791,7 @@ export class Engine {
     // Harmony: chords change on the genome's chord rate, counted from the section start.
     const chordSteps = Math.max(1, Math.round(genome.harmony.chordRateBars * STEPS_PER_BAR));
     if (rel > 0 && rel % chordSteps === 0) {
+      if (this.det) harmony.reseed(hashInts(this.det.seed, this.section, rel / chordSteps, 0xc4));
       const phraseSteps = Math.max(1, palette.phraseBars) * STEPS_PER_BAR;
       harmony.advance(this.harmonyInputs(macros), (rel + chordSteps) % phraseSteps === 0);
     }
@@ -497,13 +805,15 @@ export class Engine {
       stepInBar,
     };
 
+    // Deterministic mode does not let inputs decide fills or endings: the seed does.
+    const variation = this.det ? DET_VARIATION : macros.variation;
     // Fills: the last bar of a phrase sometimes, the end of a section always, or on request.
     if (stepInBar === 0) {
       const barsIn = Math.floor(rel / STEPS_PER_BAR);
       const phraseBars = Math.max(1, palette.phraseBars);
       const lastOfPhrase = barsIn % phraseBars === phraseBars - 1;
       const lastOfSection = barsIn === palette.sectionBars - 1;
-      const auto = new Rng(hashInts(this.chain, barsIn, 0xf111)).chance(macros.variation * 0.6);
+      const auto = new Rng(hashInts(this.chain, barsIn, 0xf111)).chance(variation * 0.6);
       if (lastOfSection || (lastOfPhrase && auto)) this.fillUntilStep = step + STEPS_PER_BAR;
     }
     if (triggers.fill > 0)
@@ -515,22 +825,28 @@ export class Engine {
     const fired = new Map<string, number>();
     const sectionLeft = palette.sectionBars * STEPS_PER_BAR - rel;
     let nei = false;
-    // Sensor events fire effects first, so a shake or a clap answers at once.
-    this.sensorFx(live);
     // The end of a section sometimes stutters, brakes or stops into the next one.
     if (rel % STEPS_PER_BAR === 12 && Math.floor(rel / STEPS_PER_BAR) === palette.sectionBars - 1) {
       const rng = new Rng(hashInts(this.chain, 0x57a7));
       const allowed = palette.effects ?? FX_IDS;
       const endings = SECTION_ENDINGS.filter(([fx]) => allowed.includes(fx));
-      if (endings.length > 0 && rng.chance(0.3 + 0.5 * macros.variation)) {
+      if (endings.length > 0 && rng.chance(0.3 + 0.5 * variation)) {
         const [ending] = endings[rng.weightedIndex(endings.map(([, w]) => w))] as [FxId, number];
         this.queueFx(ending, 0.8, Math.min(4, FX_INFO[ending].steps));
       }
     }
+    // Deterministic mode: energy and variation thin out or fill in every
+    // rhythmic pattern, against each trig's fixed roll.
+    const density = this.det
+      ? DET_DENSITY.base +
+        DET_DENSITY.energy * (macros.energy - 0.5) +
+        DET_DENSITY.variation * (macros.variation - DET_VARIATION)
+      : 0;
     for (const runner of this.runners) {
       const spec = runner.spec;
       const params = {} as TrackParams;
       for (const p of TRACK_PARAMS) params[p] = clamp(spec.base[p] + off(trackDest(spec.slot, p)));
+      if (density !== 0 && RHYTHMIC.has(spec.role)) params.prob = clamp(params.prob + density);
       let trigs = runner.step(rel, params, { fill, nei });
       if (spec.role === 'fx') {
         for (const f of trigs) if (f.trig.fx) this.queueFx(f.trig.fx, f.trig.vel, f.len);
@@ -709,6 +1025,15 @@ export class Engine {
     const state = this.trackState.get(track.slot);
     if (state) state.fired = Math.max(state.fired, vel);
   }
+}
+
+/** The played step a moment (seconds after the origin) falls in. */
+function recordAt(history: readonly StepRecord[], time: number): StepRecord | undefined {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const r = history[i] as StepRecord;
+    if (r.start <= time) return r;
+  }
+  return history[0];
 }
 
 /**

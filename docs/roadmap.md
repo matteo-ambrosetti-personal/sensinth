@@ -122,6 +122,17 @@ picked sensor's links run down the side.
 The native readers are built and tested in CI with fake bridges; the real sensors need a try on a
 Mac and an S23. Fan speed (it needs the SMC) is not read.
 
+## Phase 3.9: deterministic mode (done)
+
+- A **Deterministic** switch and a **Seed** in the Style panel, for every style: the seed writes
+  the tracks and every section, and every input has a fixed, proportional effect.
+- Inputs are read at musical time from a log; key presses, MIDI keys and controller buttons are
+  events that play their own notes at their own time; onsets of fast sensors hit a percussion
+  voice.
+- Recordings keep presses; a replay starts over at Play.
+- Tests: identical runs for the same seed and script, structure independent of the inputs, and
+  proportional differences for typing 2% slower or light 2% brighter.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /

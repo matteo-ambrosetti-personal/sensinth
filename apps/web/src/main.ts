@@ -228,20 +228,26 @@ function download(name: string, text: string): void {
 const playBtn = $<HTMLButtonElement>('play');
 const hint = $('hint');
 
-/** No sensor, no music: Play needs at least one source switched on. */
+/** No sensor, no music: Play needs at least one source switched on (deterministic mode aside). */
 function anySourceOn(): boolean {
   return sources.sources.some((s) => sources.isOn(s.id));
 }
 
 function renderTransport(): void {
   const playing = player.playing;
-  const canPlay = playing || anySourceOn();
+  const seeded = player.deterministic;
+  const canPlay = playing || anySourceOn() || seeded !== undefined;
   playBtn.setAttribute('aria-pressed', String(playing));
   playBtn.setAttribute('aria-label', playing ? 'Stop' : 'Play');
   playBtn.disabled = !canPlay;
   const channels = player.hub.list();
+  const playingSeed = player.view()?.snapshot.seed;
   if (!canPlay) hint.textContent = 'Turn on at least one sensor source. No sensor, no music.';
+  else if (!playing && seeded)
+    hint.textContent = `Seed ${seeded.seed}: the same gestures at the same times play the same music.`;
   else if (!playing) hint.textContent = 'You set tempo and style. The sensors write the rest.';
+  else if (playingSeed !== undefined)
+    hint.textContent = `Seed ${playingSeed}. Every key you type plays a note; every sensor moves the music the same way each time.`;
   else if (player.view()?.snapshot.waiting ?? true)
     hint.textContent = 'Waiting for a sensor… the music starts on the next bar after one sends.';
   else if (channels.some((c) => c.desc.source === 'phone'))
@@ -258,7 +264,7 @@ sources.onChange = () => {
 playBtn.addEventListener('click', async () => {
   if (player.playing) player.stop();
   else {
-    if (!anySourceOn()) return;
+    if (!anySourceOn() && !player.deterministic) return;
     try {
       await player.start();
     } catch (err) {
@@ -269,6 +275,42 @@ playBtn.addEventListener('click', async () => {
   renderTransport();
 });
 renderTransport();
+
+// Deterministic mode ---------------------------------------------------------
+const detOn = $<HTMLInputElement>('det-on');
+const detSeed = $<HTMLInputElement>('det-seed');
+const detDesc = $('det-desc');
+detOn.checked = prefs.deterministic ?? false;
+detSeed.value = String(prefs.seed ?? 42);
+
+function readSeed(): number {
+  const v = Math.floor(Number(detSeed.value));
+  return Number.isFinite(v) && v >= 0 ? Math.min(v, 0xffffffff) : 42;
+}
+
+function applyDeterministic(): void {
+  const seed = readSeed();
+  detSeed.value = String(seed);
+  player.setDeterministic(detOn.checked ? seed : undefined);
+  detSeed.disabled = !detOn.checked;
+  prefs.deterministic = detOn.checked;
+  prefs.seed = seed;
+  savePrefs(prefs);
+  const later = player.playing ? ' Takes effect at the next Play.' : '';
+  detDesc.textContent = detOn.checked
+    ? `The seed writes the tracks. Each sensor moves the music by a fixed amount, and every key you type plays its own note when you type it.${later}`
+    : `Off: the sensors write everything, so the smallest change plays different music.${later}`;
+  renderTransport();
+}
+detOn.addEventListener('change', applyDeterministic);
+detSeed.addEventListener('change', applyDeterministic);
+applyDeterministic();
+
+// A replay starts over at Play, so a recording always plays the same piece.
+player.beforeStart = (origin) => {
+  const replay = sources.get('replay');
+  if (replay instanceof ReplayWebSource && sources.isOn('replay')) replay.rewind(origin);
+};
 
 // Modes: Play and Sensor lab ------------------------------------------------
 const lab = new LabView(
@@ -357,6 +399,9 @@ const tracksView = new TracksView($('tracks'), $('tracks-empty'), {
 });
 const channelLabel = (id: string) => player.hub.get(id)?.desc.label ?? id;
 const matrixView = new MatrixView($('matrix'), $('matrix-empty'), channelLabel);
+const genomeHashLabel = $('g-hash-label');
+const genomeChangeLabel = $('g-change-label');
+const tracksNote = $('tracks-note');
 const genome = {
   section: $('g-section'),
   hash: $('g-hash'),
@@ -367,6 +412,7 @@ const KEY_SOURCE = {
   place: 'from the place',
   sensors: 'from the sensors',
   colour: 'moved by colour',
+  seed: 'from the seed',
 };
 const REBUILD = {
   start: 'start',
@@ -383,10 +429,18 @@ function renderGenome(view: EngineView | undefined): void {
     return;
   }
   genome.section.textContent = `${snap.section + 1} · phrase ${snap.phrase + 1}`;
-  genome.hash.textContent = `#${snap.genome}`;
+  genomeHashLabel.textContent = snap.seed !== undefined ? 'Seed' : 'Genome';
+  genome.hash.textContent = snap.seed !== undefined ? String(snap.seed) : `#${snap.genome}`;
   genome.key.textContent = `${snap.keyName}, ${KEY_SOURCE[view.keySource]}`;
+  tracksNote.textContent =
+    snap.seed !== undefined ? 'written by the seed' : 'written by the sensors';
+  // Deterministic mode rewrites only on section lines; show the notes you played instead.
+  genomeChangeLabel.textContent = snap.seed !== undefined ? 'Your notes' : 'Last rewrite';
   const r = view.rebuild;
-  genome.change.textContent = `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
+  genome.change.textContent =
+    snap.seed !== undefined
+      ? String(player.eventNotes)
+      : `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
 }
 
 let lastTracks = 0;

@@ -46,3 +46,23 @@ export interface Features {
   /** Strength of an onset detected on the latest sample, 0 when none. */
   onset: number;
 }
+
+/** What a discrete sensor event was: a key, a MIDI key, a controller button, or an onset. */
+export type SensorEventKind = 'key' | 'note' | 'button' | 'onset';
+
+/**
+ * A discrete event on a channel: a key press, a MIDI note-on, a button
+ * press, or an onset detected in a channel's readings. Deterministic mode
+ * plays each one as a note at its own time.
+ */
+export interface SensorEvent {
+  /** The channel it belongs to, e.g. `computer.keys`. */
+  id: string;
+  /** Seconds, on the same clock as samples. */
+  t: number;
+  kind: SensorEventKind;
+  /** Key: its index (see `keyIndex`); note: the MIDI note; button: its index; onset: 0. */
+  value: number;
+  /** 0..1. */
+  velocity: number;
+}

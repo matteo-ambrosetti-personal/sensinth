@@ -9,7 +9,7 @@ It runs on an Android phone (as an app or in Chrome) and on a Mac (as an app or 
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.8. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+**Status:** Phase 3.9. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
 Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
 **Free** has no style at all: the sensors also pick the instruments, from every style. It plays
 like a Digitakt driven by your surroundings: tracks with their own lengths, trig
@@ -28,7 +28,9 @@ gyroscope; on any computer the trackpad (including Force Touch pressure), keyboa
 controllers and MIDI controllers, and in Chrome the MacBook lid and CPU pressure. The **Flow** page draws the whole path live: each sensor's raw and processed signal,
 the routes it takes to the tracks, and how the tracks are mixed and sent through the effects to
 the speakers; tap a sensor to light up everything it moves. The **Sensor lab** shows one sensor at
-a time, raw and processed. See
+a time, raw and processed. Switch on **Deterministic** and set a **seed** for the opposite
+promise: the seed writes the tracks, and the same gestures at the same times play the same
+music, while gestures a little off play music a little off. See
 [docs/roadmap.md](docs/roadmap.md).
 
 ## Get it
@@ -136,6 +138,34 @@ Sensors → signal processing → ───────┼─► phrase mutation
 7. **Triggered effects** (stutter, tape stop, vinyl brake, riser, filter dive, reverb wash, dub
    throw, bit crush, gate chop, ring mod) fire on sensor events, at structural moments and from
    the FX lane, one at a time.
+
+### Deterministic mode
+
+Switch on **Deterministic** in the Style panel and pick a **seed** (42 by default). It works with
+every style and takes effect at the next Play.
+
+- **The seed writes the tracks.** Machines and track count come from the seed and the style;
+  every section's patterns, routings and harmony settings from the seed and the section number.
+  The same seed always plays the same sequence of sections, whatever the sensors do. It plays
+  with no sensor at all.
+- **Every input has a fixed, proportional effect.** Readings go through fixed curves instead of
+  learned ranges, and only move things that answer smoothly: track parameters, trig
+  probabilities against fixed rolls, swing, tension, brightness, space. Nothing is hashed, so a
+  reading 2% higher pushes the music a little further, never somewhere else.
+- **Presses play their own notes, when you press.** Every key you type plays a note on the
+  seed's melodic voice about 60 ms later: the letter picks the scale degree (a is the root, b the
+  second…), so the same letter always gives the same note in the same harmony. MIDI keys keep
+  their pitch (moved into the scale), controller buttons pick degrees, and onsets of fast
+  sensors (a shake, a clap, a cover closing) hit the seed's percussion voice.
+- **Timing is read on the music's clock.** The rate of presses comes from a smooth kernel over
+  their exact times, so typing 2% slower reads about 2% slower, and every input is read 0.2 s
+  behind the music from a log of what it did, so when a timer fires never matters.
+
+With seed 42 and an "a" every 250 ms you hear the same piece every time; at 255 ms the notes you
+type land 5 ms later each time and the rest moves by a hair (in the tests, about 0.1% of grid
+notes and under 1% of loudness). Recordings keep key presses too, and a replay starts over at
+Play, so a recording plays the identical piece. Two takes by hand are never identical to the
+millisecond, and the **Clock** source (time of day) keeps moving: turn it off for repeats.
 
 Details: [docs/architecture.md](docs/architecture.md).
 

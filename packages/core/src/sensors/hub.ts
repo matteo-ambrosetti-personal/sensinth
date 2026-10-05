@@ -1,6 +1,6 @@
 import { FeatureExtractor } from '../signal/features';
 import { timescaleOf } from './kinds';
-import type { Features, SensorDescriptor, SensorSample, Timescale } from './types';
+import type { Features, SensorDescriptor, SensorEvent, SensorSample, Timescale } from './types';
 
 export interface ChannelState {
   desc: SensorDescriptor;
@@ -35,6 +35,8 @@ const MAX_PENDING_ONSETS = 32;
 export interface HubListener {
   announce?(desc: SensorDescriptor): void;
   push?(sample: SensorSample): void;
+  /** A discrete event: a key press, a MIDI key, a button. */
+  event?(event: SensorEvent): void;
   remove?(id: string): void;
 }
 
@@ -103,6 +105,16 @@ export class SensorHub {
       this.pending.push({ id: sample.id, t: sample.t, strength: state.features.onset });
       if (this.pending.length > MAX_PENDING_ONSETS) this.pending.shift();
     }
+  }
+
+  /**
+   * Passes on a discrete event (a key press, a MIDI key, a button) of a known
+   * channel. Its readings still arrive through `push`; events only add when
+   * exactly each press happened and what it was.
+   */
+  emit(event: SensorEvent): void {
+    if (!this.channels.has(event.id) || !Number.isFinite(event.t)) return;
+    for (const l of this.listeners) l.event?.(event);
   }
 
   pushAll(samples: readonly SensorSample[]): void {

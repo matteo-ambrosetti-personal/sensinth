@@ -1,4 +1,4 @@
-import type { SensorDescriptor, SensorHub } from '@sensinth/core';
+import { keyIndex, type SensorDescriptor, type SensorHub } from '@sensinth/core';
 import { nowSeconds, type WebSensorSource } from './source';
 
 const SPEED: SensorDescriptor = {
@@ -50,6 +50,22 @@ const KEYS: SensorDescriptor = {
 
 const CHANNELS = [SPEED, POINTER_X, POINTER_Y, FORCE, KEYS];
 
+/** Keys that only modify others, or move focus: not presses of their own. */
+const IGNORED_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Fn']);
+
+/** True when the key goes into a text field (the seed, a file name), not into the music. */
+function typingIntoField(e: KeyboardEvent): boolean {
+  const el = e.target as HTMLElement | null;
+  if (!el || typeof el.closest !== 'function') return false;
+  if (el.isContentEditable) return true;
+  const field = el.closest('input, textarea, select');
+  if (!field) return false;
+  const type = (field as HTMLInputElement).type;
+  return (
+    !(field instanceof HTMLInputElement) || !['checkbox', 'radio', 'range', 'button'].includes(type)
+  );
+}
+
 /** Safari's Force Touch event: 1 at a click, 2 at a deep (force) click, up to 3. */
 type ForceEvent = MouseEvent & { webkitForce?: number };
 
@@ -57,7 +73,9 @@ type ForceEvent = MouseEvent & { webkitForce?: number };
  * A laptop has no motion sensor, so the trackpad, mouse and keyboard stand
  * in: pointer speed (and scrolling) drives energy, its height the melody's
  * register, left–right the timbre, how hard you press (Force Touch in
- * Safari and the Mac app, pens elsewhere) and typing raise accents.
+ * Safari and the Mac app, pens elsewhere) and typing raise accents. Every
+ * key press is also an event with its key, which deterministic mode plays
+ * as a note.
  */
 export class PointerSource implements WebSensorSource {
   readonly id = 'pointer';
@@ -97,14 +115,19 @@ export class PointerSource implements WebSensorSource {
     this.distance += Math.min(400, Math.hypot(e.deltaX, e.deltaY));
   };
   private readonly onKey = (e: KeyboardEvent) => {
-    if (!e.repeat) this.keyTimes.push(nowSeconds());
+    if (e.repeat || IGNORED_KEYS.has(e.key) || typingIntoField(e)) return;
+    const t = nowSeconds();
+    this.keyTimes.push(t);
+    this.hub?.emit({ id: KEYS.id, t, kind: 'key', value: keyIndex(e.key), velocity: 0.8 });
   };
+  private hub: SensorHub | undefined;
 
   unsupportedReason(): string | undefined {
     return 'PointerEvent' in window ? undefined : 'This browser has no pointer events.';
   }
 
   async start(hub: SensorHub): Promise<void> {
+    this.hub = hub;
     for (const d of CHANNELS) hub.announce(d);
     window.addEventListener('pointermove', this.onMove, { passive: true });
     window.addEventListener('pointerdown', this.onPress, { passive: true });
@@ -139,5 +162,6 @@ export class PointerSource implements WebSensorSource {
     window.removeEventListener('wheel', this.onWheel);
     window.removeEventListener('keydown', this.onKey);
     for (const d of CHANNELS) hub.remove(d.id);
+    this.hub = undefined;
   }
 }

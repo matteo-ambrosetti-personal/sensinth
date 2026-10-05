@@ -16,6 +16,8 @@ export class GamepadSource implements WebSensorSource {
   readonly description = 'Sticks, triggers and buttons; press a button to connect';
   private timer: ReturnType<typeof setInterval> | undefined;
   private announced = new Map<string, SensorDescriptor[]>();
+  /** Buttons held at the previous poll, per pad, to find new presses. */
+  private held = new Map<string, boolean[]>();
   private hub: SensorHub | undefined;
 
   private readonly onConnect = () => this.sync();
@@ -45,6 +47,7 @@ export class GamepadSource implements WebSensorSource {
     window.removeEventListener('gamepaddisconnected', this.onDisconnect);
     for (const list of this.announced.values()) for (const d of list) hub.remove(d.id);
     this.announced.clear();
+    this.held.clear();
     this.hub = undefined;
   }
 
@@ -85,6 +88,17 @@ export class GamepadSource implements WebSensorSource {
       }
       const held = pad.buttons.filter((b, i) => b.pressed && !TRIGGERS.includes(i)).length;
       hub.push({ id: `${key}.buttons`, t, v: held });
+      // Each new press is an event with its button, a note in deterministic mode.
+      const before = this.held.get(key) ?? [];
+      pad.buttons.forEach((b, i) => {
+        if (b.pressed && !before[i] && !TRIGGERS.includes(i)) {
+          hub.emit({ id: `${key}.buttons`, t, kind: 'button', value: i, velocity: 0.8 });
+        }
+      });
+      this.held.set(
+        key,
+        pad.buttons.map((b) => b.pressed),
+      );
     }
   }
 }

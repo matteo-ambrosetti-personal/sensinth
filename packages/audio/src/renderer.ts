@@ -368,6 +368,18 @@ export class Renderer {
     }
   }
 
+  /**
+   * Plays one note at an exact audio time, off the grid: the note of a press
+   * or an onset in deterministic mode. No swing, micro timing or humanizing,
+   * so its timing is exactly the event's.
+   */
+  playAt(ev: NoteEvent, time: number, stepSeconds = this.stepSeconds): void {
+    const chain = this.tracks.get(ev.part);
+    if (!chain) return;
+    const at = Math.max(time, this.ctx.currentTime);
+    chain.instrument.play(ev, at, ev.durSteps * stepSeconds, ev.params ?? chain.params);
+  }
+
   /** Fades out and disconnects everything. */
   dispose(): void {
     const t = this.ctx.currentTime;

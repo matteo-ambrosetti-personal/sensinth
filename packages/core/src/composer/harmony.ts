@@ -1,6 +1,6 @@
 import type { HarmonyGenes } from '../genome/genome';
 import { lerp, mod } from '../math';
-import type { Rng } from '../random';
+import { Rng } from '../random';
 import type { ChordDef, ChordForm, Palette } from '../styles/schema';
 import { chordSymbol, type Chord } from '../theory/chords';
 import { pitchClassName } from '../theory/notes';
@@ -48,7 +48,7 @@ export class Harmony {
 
   constructor(
     private palette: Palette,
-    private readonly rng: Rng,
+    private rng: Rng,
     genes: HarmonyGenes,
     inputs: Readonly<HarmonyInputs>,
     root: number,
@@ -91,6 +91,15 @@ export class Harmony {
   get chordMoves(): boolean {
     if (this.local && this.nextLocal) return this.local.id !== this.nextLocal.id;
     return this.next.degree !== this.chord.degree;
+  }
+
+  /**
+   * Starts a fresh random stream. Deterministic mode reseeds before every
+   * chord, so a choice that drew more or fewer numbers (a substitution taken
+   * or not) never shifts the chords after it.
+   */
+  reseed(seed: number): void {
+    this.rng = new Rng(seed);
   }
 
   /** New genome: new modes or forms to choose from and a new progression bias. */

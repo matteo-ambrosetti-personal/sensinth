@@ -9,6 +9,10 @@ export interface RenderTestOptions {
   none?: boolean;
   /** Fire this effect every other bar. */
   fx?: FxId;
+  /** Deterministic mode with this seed (no sensors unless `keys`). */
+  seed?: number;
+  /** A key pressed every `interval` seconds. */
+  keys?: { key: string; interval: number };
 }
 
 declare global {
@@ -28,7 +32,7 @@ window.sensinthEffects = [...FX_IDS];
 window.sensinthRender = async (styleId, bars, opts = {}) => {
   const style = getStyle(styleId);
   if (!style) throw new Error(`Unknown style ${styleId}`);
-  const { only, none, bpm, fx } = opts;
+  const { only, none, bpm, fx, seed, keys } = opts;
   const mute = none ? () => true : only ? (slot: string) => slot !== only : undefined;
   const { stats } = await renderOffline({
     style,
@@ -36,6 +40,8 @@ window.sensinthRender = async (styleId, bars, opts = {}) => {
     ...(bpm ? { bpm } : {}),
     ...(mute ? { mute } : {}),
     ...(fx ? { forceFx: fx } : {}),
+    ...(seed !== undefined ? { deterministic: { seed } } : {}),
+    ...(keys ? { keys } : {}),
   });
   return stats;
 };

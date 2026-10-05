@@ -4,6 +4,9 @@ export interface Prefs {
   styleId?: string;
   /** Which sensor sources were on, by source id. */
   sources?: Record<string, boolean>;
+  /** Deterministic mode, and its seed. */
+  deterministic?: boolean;
+  seed?: number;
 }
 
 const KEY = 'sensinth.prefs.v1';

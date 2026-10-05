@@ -183,7 +183,7 @@ const STRUCTURAL: Record<Timescale, readonly string[]> = {
   medium: ['prob', 'tune', 'micro', 'lfo.rate', 'retrig'],
   slow: ['chaos', 'g.swing', 'g.tension', 'lfo.rate', 'prob'],
 };
-const TIMBRAL: readonly TrackParam[] = [
+export const TIMBRAL: readonly TrackParam[] = [
   'cutoff',
   'timbre',
   'drive',
@@ -194,7 +194,7 @@ const TIMBRAL: readonly TrackParam[] = [
   'decay',
   'attack',
 ];
-const RHYTHMIC_ROLES: readonly TrackRole[] = ['drum', 'bass', 'lead', 'arp', 'chords'];
+export const RHYTHMIC_ROLES: readonly TrackRole[] = ['drum', 'bass', 'lead', 'arp', 'chords'];
 const CURVE_WEIGHTS = [0.5, 0.2, 0.15, 0.15];
 
 /**

@@ -149,6 +149,49 @@ map is chaotic. Sensors set `r` through routes and the fine fingerprint seeds `x
 follows map A. Two starting points that differ in the tenth decimal are unrelated after a few
 dozen steps: the smallest difference in a reading ends up audible.
 
+## Deterministic mode (`core/src/seeded`)
+
+`new Engine({ style, deterministic: { seed, origin, inputDelay } })` swaps the four paths above for
+a mode where the seed writes the structure and every input has a fixed, proportional effect.
+
+- **Structure from the seed.** `buildSeededGenome` calls `buildGenome` with a fingerprint made
+  from the seed, so machines and track count come from (seed, style) and each section's
+  patterns, LFOs, internal routes and harmony settings from (seed, section). Mutations use
+  (seed, section, bar) with a fixed amount; fills and section endings use a fixed `variation`.
+  There are no scene changes and no chain through the sensors. The key comes from the seed.
+  `Harmony.reseed` runs before every chord, so a substitution drawn (or not) never shifts the
+  chords after it.
+- **Inputs at musical time.** `InputModel` taps the hub and keeps every channel's readings and
+  events with their times. Step _k_ reads every channel at `origin + elapsed(k) − inputDelay`
+  (0.2 s, more than the scheduler's look-ahead), holding the latest reading at that time, so the
+  result depends only on what the sensors did and when. `absoluteScale` maps a reading with a
+  fixed curve: linear over a fixed range, logarithmic over a wide learned one (lux, speeds), and
+  around the value at Play for a channel with no range. Level, activity and trend are smoothed
+  per step with fixed constants.
+- **Presses.** `SensorHub.emit` carries discrete events: keys (`keyIndex`), MIDI notes and
+  controller buttons; onsets of fast channels are found in the readings since Play, sample by
+  sample. A press channel's level is a kernel density of press times,
+  `Σ (t − tᵢ)/τ² · e^{−(t − tᵢ)/τ}` with τ = 1 s, continuous in every press time. Presses also
+  push `energy`.
+- **Routes.** Each channel gets two routes per section from (seed, section, channel id), so adding
+  a sensor never moves another's. Only `lin` and `exp` curves, and no destinations that amplify
+  small differences (chaos rates, LFO rates); no `jitter`. Routes are added to the section's
+  matrix when a channel first appears. `energy` and `variation` also move every rhythmic track's
+  probability, against patterns written a little busier and thinned by default, so inputs can
+  both fill in and thin out.
+- **Event notes.** Every event becomes a note on one of two voices the seed picks from the
+  palette (`ev`, melodic; `hit`, a drum), realized against the harmony of the step it falls in
+  (`eventPitch`), and handed to `onEventNotes` with its exact time. The player plays it
+  `EVENT_LATENCY` (60 ms) after the event with `Renderer.playAt`, off the grid.
+- **Recordings** keep events, and the web app rewinds a replay to Play, so a recording replays
+  the identical piece. `renderOffline` takes `deterministic`, scripted `keys` and `events`.
+
+The tests check that the same seed and script give identical notes, that inputs never change
+machines or patterns, that typing 2% slower moves each event note by exactly its offset and
+changes about 0.1% of grid notes (40% slower: about 4%), and that params move monotonically with
+a reading. The sensor-driven mode is unchanged and keeps its own test that a 2% change rewrites
+most bars.
+
 ## Harmony: the rules that keep it musical (`core/src/composer`, `core/src/seq/realize.ts`)
 
 Trigs never hold MIDI notes. They hold a chord-tone index or a scale-degree offset, and

@@ -7,7 +7,8 @@ const NOTE_HOLD = 0.15;
 /**
  * MIDI controllers: every knob or fader you touch (control change) and the
  * pitch bend become channels, announced the first time they move; the keys
- * are one channel of velocities that raises accents.
+ * are one channel of velocities that raises accents, and each key played is
+ * an event with its note.
  */
 export class MidiSource implements WebSensorSource {
   readonly id = 'midi';
@@ -119,6 +120,11 @@ export class MidiSource implements WebSensorSource {
       if (desc.kind === 'midi.note') hub.push({ id: desc.id, t: nowSeconds() - 0.05, v: 0 });
     }
     this.last.set(desc.id, value);
-    hub.push({ id: desc.id, t: nowSeconds(), v: value });
+    const t = nowSeconds();
+    hub.push({ id: desc.id, t, v: value });
+    // Every key is also a note of its own, played as such in deterministic mode.
+    if (desc.kind === 'midi.note') {
+      hub.emit({ id: desc.id, t, kind: 'note', value: data[1] as number, velocity: value / 127 });
+    }
   }
 }

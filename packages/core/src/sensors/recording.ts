@@ -1,5 +1,5 @@
 import type { SensorHub } from './hub';
-import type { SensorDescriptor, SensorSample } from './types';
+import type { SensorDescriptor, SensorEvent, SensorEventKind, SensorSample } from './types';
 
 /** A sensor session saved to JSON, replayable on any device. */
 export interface SensorRecording {
@@ -10,13 +10,21 @@ export interface SensorRecording {
   descriptors: SensorDescriptor[];
   /** `[seconds since start, index into descriptors, value]`, in time order. */
   samples: [number, number, number][];
+  /**
+   * Presses (keys, MIDI keys, buttons): `[seconds since start, index into
+   * descriptors, kind, value, velocity]`, in time order. Older recordings have none.
+   */
+  events?: [number, number, SensorEventKind, number, number][];
 }
+
+const EVENT_KINDS: readonly SensorEventKind[] = ['key', 'note', 'button', 'onset'];
 
 /** Records everything a hub receives until `stop` is called. */
 export class SensorRecorder {
   private descriptors: SensorDescriptor[] = [];
   private readonly index = new Map<string, number>();
   private samples: [number, number, number][] = [];
+  private events: [number, number, SensorEventKind, number, number][] = [];
   private t0: number | undefined;
   private untap: (() => void) | undefined;
   private startedAt = '';
@@ -26,12 +34,14 @@ export class SensorRecorder {
     this.descriptors = [];
     this.index.clear();
     this.samples = [];
+    this.events = [];
     this.t0 = undefined;
     this.startedAt = startedAt.toISOString();
     for (const ch of hub.list()) this.addDescriptor(ch.desc);
     this.untap = hub.tap({
       announce: (desc) => this.addDescriptor(desc),
       push: (s) => this.addSample(s),
+      event: (e) => this.addEvent(e),
     });
   }
 
@@ -52,7 +62,7 @@ export class SensorRecorder {
   stop(): SensorRecording {
     this.untap?.();
     this.untap = undefined;
-    const used = new Set(this.samples.map((s) => s[1]));
+    const used = new Set([...this.samples.map((s) => s[1]), ...this.events.map((e) => e[1])]);
     // Keep only channels that produced samples, re-indexed.
     const remap = new Map<number, number>();
     const descriptors: SensorDescriptor[] = [];
@@ -68,6 +78,20 @@ export class SensorRecorder {
       startedAt: this.startedAt,
       descriptors,
       samples: this.samples.map(([t, i, v]) => [t, remap.get(i) as number, v]),
+      ...(this.events.length > 0
+        ? {
+            events: this.events.map(
+              ([t, i, k, v, vel]) =>
+                [t, remap.get(i) as number, k, v, vel] as [
+                  number,
+                  number,
+                  SensorEventKind,
+                  number,
+                  number,
+                ],
+            ),
+          }
+        : {}),
     };
   }
 
@@ -83,6 +107,14 @@ export class SensorRecorder {
     this.t0 ??= s.t;
     const t = Math.round((s.t - this.t0) * 1000) / 1000;
     this.samples.push([t, i, Number(s.v.toPrecision(6))]);
+  }
+
+  private addEvent(e: SensorEvent): void {
+    const i = this.index.get(e.id);
+    if (i === undefined || !Number.isFinite(e.value)) return;
+    this.t0 ??= e.t;
+    const t = Math.round((e.t - this.t0) * 1000) / 1000;
+    this.events.push([t, i, e.kind, e.value, Number(e.velocity.toPrecision(4))]);
   }
 }
 
@@ -114,6 +146,26 @@ export function parseRecording(data: unknown): SensorRecording {
     }
     lastT = s[0];
   }
+  if (r.events !== undefined) {
+    if (!Array.isArray(r.events)) throw new Error('The recording has malformed events.');
+    let lastE = -Infinity;
+    for (const e of r.events) {
+      if (
+        !Array.isArray(e) ||
+        typeof e[0] !== 'number' ||
+        typeof e[1] !== 'number' ||
+        !EVENT_KINDS.includes(e[2]) ||
+        typeof e[3] !== 'number' ||
+        typeof e[4] !== 'number' ||
+        e[1] < 0 ||
+        e[1] >= r.descriptors.length ||
+        e[0] < lastE
+      ) {
+        throw new Error('The recording has malformed or out-of-order events.');
+      }
+      lastE = e[0];
+    }
+  }
   return r as SensorRecording;
 }
 
@@ -134,6 +186,8 @@ export class ReplaySource {
   private readonly loop: boolean;
   private next = 0;
   private offset = 0;
+  private nextEvent = 0;
+  private eventOffset = 0;
 
   constructor(
     private readonly rec: SensorRecording,
@@ -149,8 +203,45 @@ export class ReplaySource {
     }));
     this.ids = this.descriptors.map((d) => d.id);
     const last = rec.samples[rec.samples.length - 1];
-    this.duration = last ? last[0] : 0;
+    const lastEvent = rec.events?.[rec.events.length - 1];
+    this.duration = Math.max(last ? last[0] : 0, lastEvent ? lastEvent[0] : 0);
     this.loop = (opts.loop ?? true) && this.duration > 0;
+  }
+
+  /** Starts again from the beginning. */
+  rewind(): void {
+    this.next = 0;
+    this.offset = 0;
+    this.nextEvent = 0;
+    this.eventOffset = 0;
+  }
+
+  /** The recording's presses up to `elapsed` seconds into playback, stamped like `samplesUntil`. */
+  eventsUntil(elapsed: number, origin = 0): SensorEvent[] {
+    const out: SensorEvent[] = [];
+    const events = this.rec.events ?? [];
+    if (events.length === 0) return out;
+    const loopLength = this.duration + 0.05;
+    for (;;) {
+      const e = events[this.nextEvent];
+      if (!e) break;
+      const t = e[0] + this.eventOffset;
+      if (t > elapsed) break;
+      out.push({
+        id: this.ids[e[1]] as string,
+        t: origin + t,
+        kind: e[2],
+        value: e[3],
+        velocity: e[4],
+      });
+      this.nextEvent++;
+      if (this.nextEvent >= events.length) {
+        if (!this.loop) break;
+        this.nextEvent = 0;
+        this.eventOffset += loopLength;
+      }
+    }
+    return out;
   }
 
   /**
