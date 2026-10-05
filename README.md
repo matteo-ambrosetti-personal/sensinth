@@ -8,8 +8,9 @@ It runs as a web app (PWA) on an Android phone first. The music engine is plain 
 browser dependencies, so the same code can later run on a Raspberry Pi, with microcontrollers such
 as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 1. The engine plays the Chiptune style from simulated sensors. Real phone sensors
-are the next phase; see [docs/roadmap.md](docs/roadmap.md).
+**Status:** Phase 2. The Chiptune style plays from your phone's motion, tilt, compass,
+microphone, camera, location, clock and battery. Sensor sessions can be recorded and replayed. The
+Ambient and Lo-fi styles are next; see [docs/roadmap.md](docs/roadmap.md).
 
 ## How it works
 
@@ -38,7 +39,12 @@ pnpm install
 pnpm dev          # http://localhost:5173
 ```
 
-Press play: the simulated sensors start driving the dials and the music.
+Press play. On a computer, simulated sensors drive the dials and the music; on a phone, motion and
+tilt are on from the start. Turn on more sources (microphone, camera, location) in the Sources
+panel.
+
+Use _Record sensors_ to save a session as JSON, and _Load recording_ to replay it, on any device.
+Recordings are the quickest way to tune the music on a computer with real sensor data.
 
 ### On your phone
 

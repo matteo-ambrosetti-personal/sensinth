@@ -129,6 +129,28 @@ with a Web Audio implementation, reusing the same code.
 
 ## Web app (`apps/web`)
 
-A Vite PWA. `Player` wires the sensor sources, the engine, the renderer and the scheduler; every
-Play starts a new piece with a new seed. The UI shows the tempo and style controls, the dials
-with the sensors feeding them, and each sensor's value, level, activity, onsets and routes.
+A Vite PWA. `Player` wires the hub, the engine, the renderer and the scheduler; every Play
+starts a new piece with a new seed, in the key of the current place when location is on. The UI
+shows the tempo and style controls, the dials with the sensors feeding them, the sources, and each
+sensor's value, level, activity, onsets and routes.
+
+### Sensor sources (`apps/web/src/sensors`)
+
+Each source implements `WebSensorSource`: it announces its channels on the hub, pushes samples
+stamped with `performance.now()`, and throws a `SourceError` with a sentence for the user when it
+cannot start. `SourceManager` tracks each source's state (off, starting, on, error, unsupported)
+for the Sources panel, and restores sources on reload only when that will not show a prompt.
+
+Feature extraction that is not browser-specific lives in `core`, so a Raspberry Pi can reuse it:
+`FrameAnalyzer` (camera brightness, hue and motion that ignores exposure shifts), `rmsDb` and
+`spectralCentroid` (microphone), `daylight` and `placeKey`.
+
+The microphone hears the music. While playing, `Player` sets `SensorHub.onsetGate` so sound onsets
+within 300 ms after one of our own drum hits do not raise triggers.
+
+### Recordings
+
+`SensorRecorder` taps the hub and stores descriptors plus `[t, channel, value]` samples;
+`parseRecording` validates a file; `ReplaySource` plays it back in order, looping, with channel ids
+prefixed `replay:` so they never clash with live ones. Replaying a recording into the engine is
+deterministic, which makes recordings the way to tune styles with real data.
