@@ -2,7 +2,7 @@ import { midiToFreq, type NoteEvent, type Patch, type TrackParams } from '@sensi
 import { applyEnvelope } from '../envelope';
 import { shapeEnvelope } from '../params';
 import type { Instrument } from './types';
-import { addVibrato, connectDetune, VoiceLimiter } from './voice';
+import { addTremolo, addVibrato, connectDetune, VoiceLimiter } from './voice';
 
 type FmPatch = Extract<Patch, { type: 'fm' }>;
 
@@ -29,7 +29,6 @@ export class FmInstrument implements Instrument {
     const gate = Math.max(0.01, duration * (patch.gate ?? 1));
     const vca = ctx.createGain();
     vca.gain.value = 0;
-    vca.connect(this.output);
     const end = applyEnvelope(vca.gain, time, gate, shapeEnvelope(patch.env, params), ev.vel);
 
     const freq = midiToFreq(ev.midi);
@@ -49,6 +48,8 @@ export class FmInstrument implements Instrument {
     );
     modulator.connect(depth).connect(carrier.frequency);
     carrier.connect(vca);
+    if (patch.tremolo) addTremolo(ctx, vca, this.output, patch.tremolo, time, end);
+    else vca.connect(this.output);
     addVibrato(ctx, carrier, patch.vibrato, time, gate, end);
     for (const osc of [carrier, modulator]) {
       connectDetune(osc, this.detuneMod);

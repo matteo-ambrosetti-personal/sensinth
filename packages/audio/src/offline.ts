@@ -72,6 +72,7 @@ export async function renderOffline(
     if (engine.genomeVersion !== version) {
       version = engine.genomeVersion;
       const machines = engine.trackMachines();
+      renderer.setFx(engine.fx);
       renderer.setTracks(machines);
       for (const m of machines) {
         slots.add(m.slot);

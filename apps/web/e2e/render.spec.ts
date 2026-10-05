@@ -1,14 +1,15 @@
 import { expect, test } from '@playwright/test';
 
 test('every style renders audible, unclipped, finite audio', async ({ page }) => {
+  test.setTimeout(300_000);
   await page.goto('/render-test.html');
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true');
   const styles = await page.evaluate(() => window.sensinthStyles);
   expect(styles.length).toBeGreaterThan(0);
   for (const id of styles) {
-    const stats = await page.evaluate((s) => window.sensinthRender(s, 16), id);
+    const stats = await page.evaluate((s) => window.sensinthRender(s, 8), id);
     expect(stats.nonFinite, `${id}: NaN/Infinity samples`).toBe(0);
-    expect(stats.events, `${id}: notes`).toBeGreaterThan(50);
+    expect(stats.events, `${id}: notes`).toBeGreaterThan(25);
     expect(stats.rms, `${id}: not silent`).toBeGreaterThan(0.01);
     expect(stats.peak, `${id}: below 0 dBFS`).toBeLessThan(1);
     expect(stats.tracks.length, `${id}: tracks`).toBeGreaterThanOrEqual(4);

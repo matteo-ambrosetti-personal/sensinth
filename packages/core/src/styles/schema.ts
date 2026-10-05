@@ -27,10 +27,58 @@ export interface Vibrato {
 }
 
 export type DrumVoice =
-  'kick' | 'snare' | 'clap' | 'rim' | 'hat' | 'ohat' | 'shaker' | 'tom' | 'perc' | 'zap' | 'noise';
+  | 'kick'
+  | 'snare'
+  | 'brush'
+  | 'clap'
+  | 'rim'
+  | 'hat'
+  | 'ohat'
+  | 'ride'
+  | 'crash'
+  | 'cowbell'
+  | 'shaker'
+  | 'tom'
+  | 'perc'
+  | 'zap'
+  | 'noise';
 
 /** Sound family of a drum voice: 8-bit, dusty boom-bap, or soft and round. */
 export type DrumFlavor = 'chip' | 'lofi' | 'soft';
+
+/** A per-note low-pass with its own envelope: the squelch of an acid bass. */
+export interface NoteFilter {
+  /** Cutoff in Hz at the bottom and top of its sweep. */
+  range: [number, number];
+  /** Resonance (Q). */
+  q: number;
+  /** Envelope depth 0..1; accents (loud notes) open it further. */
+  env: number;
+  /** Seconds for the envelope to close. */
+  decay: number;
+}
+
+/** Monophonic pitch slide between notes that ask for it. */
+export interface Glide {
+  /** Seconds to reach the new note. */
+  time: number;
+}
+
+/** A pitch drop at the start of each note (808s, toms). */
+export interface PitchEnvelope {
+  /** Semitones above the note it starts from. */
+  semitones: number;
+  /** Seconds to fall to the note. */
+  time: number;
+}
+
+/** Amplitude wobble: vibraphone motor, Leslie speaker. */
+export interface Tremolo {
+  /** Hz. */
+  rate: number;
+  /** 0..1. */
+  depth: number;
+}
 
 /** Sound of a machine. Interpreted by the audio renderer; track params shape it further. */
 export type Patch =
@@ -43,6 +91,8 @@ export type Patch =
       /** Fraction of the note length the gate stays open. */
       gate?: number;
       vibrato?: Vibrato;
+      filter?: NoteFilter;
+      glide?: Glide;
     }
   | {
       type: 'osc';
@@ -53,6 +103,9 @@ export type Patch =
       /** Cents between two detuned oscillators per note (0 = one oscillator); `timbre` scales it. */
       detune?: number;
       vibrato?: Vibrato;
+      filter?: NoteFilter;
+      glide?: Glide;
+      pitchEnv?: PitchEnvelope;
     }
   | {
       /** Two-operator FM: electric-piano keys, bells, soft leads. */
@@ -67,6 +120,7 @@ export type Patch =
       env: Envelope;
       gate?: number;
       vibrato?: Vibrato;
+      tremolo?: Tremolo;
     }
   | {
       /** Several detuned oscillators through a low-pass that opens with the note. */
@@ -81,6 +135,16 @@ export type Patch =
       cutoff: [number, number];
       env: Envelope;
       gate?: number;
+    }
+  | {
+      /** Additive organ: drawbar levels for the 16', 5⅓', 8', 4', 2⅔', 2', 1⅗', 1⅓' and 1' pipes. */
+      type: 'organ';
+      gain: number;
+      drawbars: readonly number[];
+      env: Envelope;
+      gate?: number;
+      /** Leslie-like tremolo; `timbre` speeds it up. */
+      tremolo?: Tremolo;
     }
   | {
       /** One synthesized drum voice; tune, decay, timbre and drive reshape it. */
@@ -115,9 +179,34 @@ export interface Machine {
   pentatonic?: boolean;
   /** Drones: also hold the fifth. */
   fifth?: boolean;
+  /** Leads may bend to blue notes (♭3, ♭5 of the key) on weak steps. */
+  blueNotes?: boolean;
   /** Longest melodic note, in steps. */
   maxLen?: number;
+  /** Rhythm the pattern generator follows (default: Euclidean). */
+  rhythm?: RhythmHint;
+  /** Chance that a note slides into the next (needs a patch with `glide`). */
+  slide?: number;
 }
+
+/**
+ * Rhythm templates a machine's patterns follow:
+ * - `four`: four on the floor; `offbeat`: the "and" of every beat;
+ * - `backbeat`: beats 2 and 4; `break`: breakbeat kick/snare figures;
+ * - `walking`: a note on every beat, into the next chord;
+ * - `ride`: the jazz ride figure; `charleston`: comping on 1 and the "and" of 2;
+ * - `pulse`: steady eighths; `euclid`: evenly spread hits (default).
+ */
+export type RhythmHint =
+  | 'euclid'
+  | 'four'
+  | 'offbeat'
+  | 'backbeat'
+  | 'break'
+  | 'walking'
+  | 'ride'
+  | 'charleston'
+  | 'pulse';
 
 /** A place for a track in the pattern, filled with one of the listed machines. */
 export interface SlotOption {
@@ -129,6 +218,39 @@ export interface SlotOption {
   weight?: number;
 }
 
+/** A chord built on its own local scale: the tonic chord of `mode`, rooted `root` semitones above the key. */
+export interface ChordDef {
+  /** Shown as the roman numeral, e.g. `IV7`, `ii∅`. */
+  id: string;
+  /** Semitones above the key's root. */
+  root: number;
+  /** The local scale; its tonic chord gives the quality (mixolydian → 7, locrian → m7♭5, …). */
+  mode: ModeId;
+}
+
+/** A fixed chord sequence that loops, like a 12-bar blues. */
+export interface ChordForm {
+  id: string;
+  label: string;
+  /** Where `brightness` picks this form, 0 dark .. 1 bright. */
+  brightness: number;
+  /** One chord id per chord change. */
+  sequence: readonly string[];
+}
+
+/**
+ * Harmony for styles whose chords leave the key (blues, jazz): every chord
+ * carries its own scale, and progressions follow forms.
+ */
+export interface ChordScales {
+  /** Shown after the key's name, e.g. "C blues". */
+  keyLabel: string;
+  chords: readonly ChordDef[];
+  forms: readonly ChordForm[];
+  /** Chords tension may swap in, e.g. a tritone substitute for V7. */
+  substitutions?: Record<string, readonly string[]>;
+}
+
 /**
  * The sound world of a style. Sensors decide everything inside it: which
  * machines play, the patterns, lengths, routings, timbres, key and mode.
@@ -136,7 +258,10 @@ export interface SlotOption {
 export interface Palette {
   /** Modes the genome chooses from; `brightness` moves within its choice. */
   modes: readonly ModeId[];
+  /** Diatonic chord progression (ignored when `chordScales` is set). */
   progression: MarkovTable;
+  /** Chords with their own scales and forms, for blues and jazz. */
+  chordScales?: ChordScales;
   /** Bars per chord to choose from. */
   chordRates: readonly number[];
   /** Notes per chord, [min, max]; `tension` picks within it. */
@@ -190,6 +315,8 @@ export interface Style {
   defaultTempo: number;
   palette: Palette;
   fx: FxConfig;
+  /** Effects the genome may pick from per section, instead of `fx`. */
+  fxPresets?: readonly FxConfig[];
   /** Style-specific mapping rules for the macros, layered over the defaults. */
   mapping?: Partial<MappingRules>;
 }

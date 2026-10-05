@@ -1,9 +1,23 @@
 import { mod } from '../math';
 import { pitchClassName } from './notes';
 
-export type ModeId = 'lydian' | 'ionian' | 'mixolydian' | 'dorian' | 'aeolian' | 'phrygian';
+export type ModeId =
+  | 'lydian'
+  | 'ionian'
+  | 'mixolydian'
+  | 'dorian'
+  | 'aeolian'
+  | 'phrygian'
+  | 'locrian'
+  | 'phrygianDominant'
+  | 'lydianDominant';
 
-/** Diatonic modes, as semitone offsets from the root. */
+/**
+ * Seven-note modes, as semitone offsets from the root: the six diatonic modes
+ * a key moves between, plus the local scales jazz and blues chords need
+ * (locrian for ii∅, phrygian dominant for V7♭9, lydian dominant for IV7 and
+ * tritone substitutes).
+ */
 export const MODES: Record<ModeId, { intervals: readonly number[]; label: string }> = {
   lydian: { intervals: [0, 2, 4, 6, 7, 9, 11], label: 'Lydian' },
   ionian: { intervals: [0, 2, 4, 5, 7, 9, 11], label: 'Major' },
@@ -11,10 +25,26 @@ export const MODES: Record<ModeId, { intervals: readonly number[]; label: string
   dorian: { intervals: [0, 2, 3, 5, 7, 9, 10], label: 'Dorian' },
   aeolian: { intervals: [0, 2, 3, 5, 7, 8, 10], label: 'Minor' },
   phrygian: { intervals: [0, 1, 3, 5, 7, 8, 10], label: 'Phrygian' },
+  locrian: { intervals: [0, 1, 3, 5, 6, 8, 10], label: 'Locrian' },
+  phrygianDominant: { intervals: [0, 1, 4, 5, 7, 8, 10], label: 'Phrygian dominant' },
+  lydianDominant: { intervals: [0, 2, 4, 6, 7, 9, 10], label: 'Lydian dominant' },
 };
 
 /** Modes from darkest to brightest; `brightness` walks along this ladder. */
 export const MODE_LADDER: readonly ModeId[] = [
+  'locrian',
+  'phrygian',
+  'phrygianDominant',
+  'aeolian',
+  'dorian',
+  'mixolydian',
+  'lydianDominant',
+  'ionian',
+  'lydian',
+];
+
+/** The six modes of the major scale, which keys move between. */
+export const DIATONIC_MODES: readonly ModeId[] = [
   'phrygian',
   'aeolian',
   'dorian',

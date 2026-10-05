@@ -9,6 +9,7 @@ export {
   type DrumLayer,
 } from './instruments/drums';
 export { FmInstrument } from './instruments/fm';
+export { OrganInstrument } from './instruments/organ';
 export { PadInstrument } from './instruments/pad';
 export { TonalInstrument } from './instruments/tonal';
 export type { Instrument } from './instruments/types';

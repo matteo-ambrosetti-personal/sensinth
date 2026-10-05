@@ -6,7 +6,10 @@ import {
   SimulatedSource,
   STYLES,
   ambient,
+  blues,
   chiptune,
+  free,
+  jazz,
   isChordTone,
   stepDuration,
   type NoteEvent,
@@ -18,6 +21,8 @@ import {
 interface Played {
   ev: NoteEvent;
   inScale: boolean;
+  /** A blue note where the rules allow one: a lead that may bend, a weak step, ♭3 or ♭5 of the key. */
+  blueOk: boolean;
   chordTone: boolean;
   range: [number, number] | undefined;
 }
@@ -57,12 +62,19 @@ function run(style: Style, bars: number, sensors: SensorScript = sim(), seed = 0
     for (const ev of events) {
       const scale = engine.scale;
       const chord = engine.chord;
+      const machine = machines.get(ev.part);
+      const rel = ev.midi === undefined ? -1 : (((ev.midi - (engine.key ?? 0)) % 12) + 12) % 12;
       out.push({
         ev,
         inScale: ev.midi === undefined || (scale?.contains(ev.midi) ?? false),
+        blueOk:
+          !!machine?.blueNotes &&
+          ev.role === 'lead' &&
+          ev.step % 2 === 1 &&
+          (rel === 3 || rel === 6),
         chordTone:
           ev.midi === undefined || (scale && chord ? isChordTone(scale, chord, ev.midi) : false),
-        range: machines.get(ev.part)?.range,
+        range: machine?.range,
       });
     }
   }
@@ -109,8 +121,8 @@ describe('Engine', () => {
         expect(played.length).toBeGreaterThan(100);
       });
 
-      it('keeps every pitched note in the current scale', () => {
-        expect(played.filter((p) => !p.inScale)).toEqual([]);
+      it('keeps every pitched note in the current scale (blue notes aside)', () => {
+        expect(played.filter((p) => !p.inScale && !p.blueOk)).toEqual([]);
       });
 
       it('lands melodic notes on chord tones on strong beats', () => {
@@ -326,5 +338,77 @@ describe('Ambient drone', () => {
       }
     }
     expect(drones).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe('Chord scales', () => {
+  /** Chord names at every bar line, with frozen sensors so nothing rewrites the form. */
+  function barChords(style: Style, bars: number): string[] {
+    const engine = new Engine({ style });
+    const sensors = frozen();
+    for (const d of sensors.descriptors) engine.hub.announce(d);
+    const dt = stepDuration(style.defaultTempo);
+    const chords: string[] = [];
+    for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
+      engine.hub.pushAll(sensors.sampleAt(step * dt));
+      engine.tick(dt);
+      if (step % STEPS_PER_BAR === 0) chords.push(engine.snapshot().chordRoman);
+    }
+    return chords;
+  }
+
+  it('plays the blues as a 12-bar form', () => {
+    const chords = barChords(blues, 24);
+    const forms = (blues.palette.chordScales?.forms ?? []).map((f) => f.sequence.join(' '));
+    expect(forms).toContain(chords.slice(0, 12).join(' '));
+    expect(chords.slice(12, 24)).toEqual(chords.slice(0, 12));
+  });
+
+  it('moves jazz between chords on their own scales', () => {
+    const engine = new Engine({ style: jazz });
+    const sensors = sim();
+    for (const d of sensors.descriptors) engine.hub.announce(d);
+    const dt = stepDuration(jazz.defaultTempo);
+    const roots = new Set<number>();
+    const modes = new Set<string>();
+    for (let step = 0; step < 32 * STEPS_PER_BAR; step++) {
+      engine.hub.pushAll(sensors.sampleAt(step * dt));
+      engine.tick(dt);
+      if (engine.scale) {
+        roots.add(engine.scale.root);
+        modes.add(engine.scale.mode);
+      }
+    }
+    expect(roots.size).toBeGreaterThanOrEqual(3);
+    expect(modes.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('resolves every blue note by a step', () => {
+    const played = run(blues, 64).filter((p) => p.ev.role === 'lead');
+    let blueNotes = 0;
+    played.forEach((p, i) => {
+      if (p.inScale || !p.blueOk) return;
+      blueNotes++;
+      const next = played.slice(i + 1).find((q) => q.ev.part === p.ev.part);
+      if (next?.ev.midi !== undefined) {
+        expect(Math.abs(next.ev.midi - (p.ev.midi as number))).toBeLessThanOrEqual(2);
+      }
+    });
+    expect(blueNotes).toBeGreaterThan(0);
+  });
+});
+
+describe('Free mode', () => {
+  it('builds tracks from several styles', () => {
+    const styles = new Set<string>();
+    for (const sensorSeed of [1, 2, 3, 4, 5, 6]) {
+      const engine = new Engine({ style: free });
+      const source = new SimulatedSource(sensorSeed);
+      for (const d of source.descriptors) engine.hub.announce(d);
+      engine.hub.pushAll(source.sampleAt(0));
+      engine.tick(0.1);
+      for (const m of engine.trackMachines()) styles.add(m.machineId.split('.')[0] as string);
+    }
+    expect(styles.size).toBeGreaterThanOrEqual(4);
   });
 });

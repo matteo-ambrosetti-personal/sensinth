@@ -1,6 +1,13 @@
-import { midiToFreq, type NoteEvent, type Patch, type TrackParams } from '@sensinth/core';
+import {
+  clamp,
+  expLerp,
+  midiToFreq,
+  type NoteEvent,
+  type Patch,
+  type TrackParams,
+} from '@sensinth/core';
 import { applyEnvelope } from '../envelope';
-import { shapeEnvelope } from '../params';
+import { octaves, shapeEnvelope } from '../params';
 import type { WaveTable } from '../waves';
 import type { Instrument } from './types';
 import { addVibrato, connectDetune, VoiceLimiter } from './voice';
@@ -9,11 +16,17 @@ type TonalPatch = Extract<Patch, { type: 'pulse' | 'osc' }>;
 
 /**
  * Pulse and basic-oscillator voices with ADSR, optional detune and delayed
- * vibrato. `timbre` picks the pulse width or widens the detune.
+ * vibrato. `timbre` picks the pulse width or widens the detune. Optional:
+ * - a per-note resonant low-pass with its own envelope, opened further by
+ *   accents (loud notes): the acid squelch;
+ * - glide: a note marked `slide` bends from the previous note;
+ * - a pitch envelope: each note drops into place (808s).
  */
 export class TonalInstrument implements Instrument {
   readonly output: GainNode;
   private readonly limiter = new VoiceLimiter();
+  private lastFreq: number | undefined;
+  private lastEnd = -Infinity;
 
   constructor(
     private readonly ctx: BaseAudioContext,
@@ -33,9 +46,35 @@ export class TonalInstrument implements Instrument {
     vca.connect(this.output);
     const end = applyEnvelope(vca.gain, time, gate, shapeEnvelope(patch.env, params), ev.vel);
 
+    // Per-note filter with an envelope; accents open it further.
+    let input: AudioNode = vca;
+    if (patch.filter) {
+      const f = patch.filter;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = f.q;
+      const base = expLerp(f.range[0], f.range[1], clamp(params.timbre * 0.7));
+      const accent = ev.vel > 0.85 ? 1.6 : 1;
+      const peak = expLerp(base, f.range[1], clamp(f.env * accent));
+      filter.frequency.setValueAtTime(peak, time);
+      filter.frequency.setTargetAtTime(
+        base,
+        time + 0.004,
+        (f.decay * octaves(params.decay, 2)) / 3,
+      );
+      filter.connect(vca);
+      input = filter;
+    }
+
     const detune = patch.type === 'osc' ? (patch.detune ?? 0) * (0.25 + 1.5 * params.timbre) : 0;
     const spread = detune > 0 ? [-detune / 2, detune / 2] : [0];
     const freq = midiToFreq(ev.midi);
+    const from =
+      patch.glide && ev.slide && this.lastFreq !== undefined && time <= this.lastEnd + 0.05
+        ? this.lastFreq
+        : undefined;
+    this.lastFreq = freq;
+    this.lastEnd = time + gate;
     for (const cents of spread) {
       const osc = ctx.createOscillator();
       if (patch.type === 'pulse') {
@@ -45,11 +84,20 @@ export class TonalInstrument implements Instrument {
       } else {
         osc.type = patch.wave;
       }
-      osc.frequency.setValueAtTime(freq, time);
+      if (from !== undefined && patch.glide) {
+        osc.frequency.setValueAtTime(from, time);
+        osc.frequency.exponentialRampToValueAtTime(freq, time + Math.max(0.005, patch.glide.time));
+      } else if (patch.type === 'osc' && patch.pitchEnv) {
+        const { semitones, time: fall } = patch.pitchEnv;
+        osc.frequency.setValueAtTime(freq * Math.pow(2, semitones / 12), time);
+        osc.frequency.exponentialRampToValueAtTime(freq, time + Math.max(0.005, fall));
+      } else {
+        osc.frequency.setValueAtTime(freq, time);
+      }
       osc.detune.setValueAtTime(cents, time);
       addVibrato(ctx, osc, patch.vibrato, time, gate, end);
       connectDetune(osc, this.detuneMod);
-      osc.connect(vca);
+      osc.connect(input);
       osc.start(time);
       osc.stop(end);
     }

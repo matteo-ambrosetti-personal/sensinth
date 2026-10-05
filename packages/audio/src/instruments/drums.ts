@@ -53,7 +53,37 @@ export const CHIP_KIT: DrumKitDefinition = {
   ],
   zap: [{ kind: 'tone', wave: 'square', from: 2400, to: 120, sweep: 0.09, decay: 0.12, gain: 0.4 }],
   noise: [{ kind: 'noise', filter: 'bandpass', freq: 2500, q: 0.8, decay: 0.09, gain: 0.6 }],
+  brush: [{ kind: 'noise', filter: 'bandpass', freq: 3000, q: 0.6, decay: 0.16, gain: 0.45 }],
+  ride: [
+    { kind: 'noise', filter: 'highpass', freq: 6000, decay: 0.45, gain: 0.22 },
+    { kind: 'tone', wave: 'square', from: 3100, to: 3050, sweep: 0.02, decay: 0.25, gain: 0.05 },
+  ],
+  crash: [{ kind: 'noise', filter: 'highpass', freq: 3500, decay: 1.1, gain: 0.35 }],
+  cowbell: [
+    { kind: 'tone', wave: 'square', from: 560, to: 560, sweep: 0.01, decay: 0.12, gain: 0.22 },
+    { kind: 'tone', wave: 'square', from: 845, to: 845, sweep: 0.01, decay: 0.1, gain: 0.18 },
+  ],
 };
+
+/** Shared by the lo-fi and soft kits. */
+const ACOUSTIC_EXTRAS = {
+  brush: [
+    { kind: 'noise', filter: 'bandpass', freq: 2600, q: 0.5, decay: 0.22, gain: 0.4 },
+    { kind: 'noise', filter: 'highpass', freq: 5000, decay: 0.08, gain: 0.15, at: 0.01 },
+  ],
+  ride: [
+    { kind: 'noise', filter: 'bandpass', freq: 7000, q: 1.4, decay: 0.55, gain: 0.25 },
+    { kind: 'tone', wave: 'triangle', from: 820, to: 810, sweep: 0.02, decay: 0.35, gain: 0.08 },
+  ],
+  crash: [
+    { kind: 'noise', filter: 'highpass', freq: 3000, decay: 1.6, gain: 0.32 },
+    { kind: 'noise', filter: 'bandpass', freq: 6000, q: 0.7, decay: 0.9, gain: 0.15 },
+  ],
+  cowbell: [
+    { kind: 'tone', wave: 'triangle', from: 560, to: 556, sweep: 0.02, decay: 0.18, gain: 0.35 },
+    { kind: 'tone', wave: 'triangle', from: 845, to: 840, sweep: 0.02, decay: 0.14, gain: 0.25 },
+  ],
+} satisfies Partial<Record<DrumVoice, readonly DrumLayer[]>>;
 
 /** Soft, round boom-bap drums. */
 export const LOFI_KIT: DrumKitDefinition = {
@@ -80,6 +110,7 @@ export const LOFI_KIT: DrumKitDefinition = {
   ],
   zap: [{ kind: 'tone', wave: 'sine', from: 1500, to: 200, sweep: 0.12, decay: 0.12, gain: 0.4 }],
   noise: [{ kind: 'noise', filter: 'bandpass', freq: 2500, q: 2, decay: 0.02, gain: 0.3 }],
+  ...ACOUSTIC_EXTRAS,
 };
 
 /** Round and quiet: felt kicks, brushed noise, wooden rims. */

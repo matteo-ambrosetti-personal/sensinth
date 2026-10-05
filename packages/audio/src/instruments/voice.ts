@@ -1,4 +1,4 @@
-import type { Vibrato } from '@sensinth/core';
+import type { Tremolo, Vibrato } from '@sensinth/core';
 
 const MAX_VOICES = 8;
 
@@ -36,6 +36,28 @@ export function addVibrato(
   depth.gain.setValueAtTime(0, time + vibrato.delay);
   depth.gain.linearRampToValueAtTime(vibrato.depth, time + vibrato.delay + 0.2);
   lfo.connect(depth).connect(osc.detune);
+  lfo.start(time);
+  lfo.stop(end);
+}
+
+/** Routes `from` to `to` through a gain that wobbles with an LFO (vibraphone, Leslie). */
+export function addTremolo(
+  ctx: BaseAudioContext,
+  from: AudioNode,
+  to: AudioNode,
+  tremolo: Tremolo,
+  time: number,
+  end: number,
+): void {
+  const depth = Math.min(1, Math.max(0, tremolo.depth));
+  const amp = ctx.createGain();
+  amp.gain.value = 1 - depth / 2;
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = tremolo.rate;
+  const swing = ctx.createGain();
+  swing.gain.value = depth / 2;
+  lfo.connect(swing).connect(amp.gain);
+  from.connect(amp).connect(to);
   lfo.start(time);
   lfo.stop(end);
 }

@@ -20,6 +20,8 @@ export interface NoteEvent {
   micro?: number;
   /** Repeats of the note, e.g. a hi-hat roll. */
   retrig?: Retrig;
+  /** Slide into this note from the previous one. */
+  slide?: boolean;
   /** The track's parameters for this note (base or p-lock, plus modulation), 0..1. */
   params?: TrackParams;
 }

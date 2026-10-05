@@ -21,13 +21,15 @@ import { Rng, hashInts, hashString } from '../random';
 import { generateTrack } from '../seq/generate';
 import type { TrackRole, TrackSpec } from '../seq/types';
 import type { Timescale } from '../sensors/types';
-import type { Palette, Style } from '../styles/schema';
+import type { FxConfig, Palette, Style } from '../styles/schema';
 import { byBrightness, type ModeId } from '../theory/scales';
 import type { ChannelPrint, Fingerprint } from './fingerprint';
 
 export interface HarmonyGenes {
   /** Modes to move between, darkest first; `brightness` picks one. */
   modes: ModeId[];
+  /** Forms to choose from (chord-scale palettes); `brightness` picks one. */
+  forms: string[];
   chordRateBars: number;
   /** Multiplier on the chance of moving to each scale degree's chord. */
   progressionBias: number[];
@@ -50,6 +52,8 @@ export interface Genome {
   swing: number;
   /** Pattern density 0..1 chosen for this section. */
   density: number;
+  /** Effects for this section, when the style offers several (Free). */
+  fx?: FxConfig;
 }
 
 /**
@@ -97,6 +101,13 @@ export function buildGenome(
 
   const modeCount = Math.min(palette.modes.length, rng.int(2, 3));
   const modes = byBrightness(shuffle(rng, palette.modes).slice(0, modeCount));
+  const allForms = palette.chordScales?.forms ?? [];
+  const forms =
+    allForms.length === 0
+      ? []
+      : shuffle(rng, allForms)
+          .slice(0, rng.int(Math.ceil(allForms.length / 2), allForms.length))
+          .map((f) => f.id);
   return {
     chain,
     coarseHash: fp.coarseHash,
@@ -112,11 +123,15 @@ export function buildGenome(
     },
     harmony: {
       modes,
+      forms,
       chordRateBars: rng.pick(palette.chordRates),
       progressionBias: Array.from({ length: 7 }, () => rng.range(0.4, 1.8)),
     },
     swing: rng.next(),
     density,
+    ...(style.fxPresets && style.fxPresets.length > 0
+      ? { fx: style.fxPresets[hashInts(chain, 0xf0) % style.fxPresets.length] as FxConfig }
+      : {}),
   };
 }
 

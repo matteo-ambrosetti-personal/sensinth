@@ -39,6 +39,8 @@ export interface TrigNote {
   oct: number;
   /** Bass: walk into the next chord's root by a scale step. */
   approach?: boolean;
+  /** Lead: bend to a blue note (♭3 or ♭5 of the key) on a weak step, then resolve. */
+  blue?: boolean;
 }
 
 export interface Retrig {
@@ -62,6 +64,8 @@ export interface Trig {
   /** Offset from the grid, in steps (−0.45..0.45). */
   micro: number;
   retrig?: Retrig;
+  /** Slide into this note from the previous one (machines with glide). */
+  slide?: boolean;
   /** Parameter locks for this trig only. */
   locks?: Partial<Record<TrackParam, number>>;
 }
@@ -89,6 +93,8 @@ export interface TrackSpec {
   pentatonic?: boolean;
   /** Drones: also hold the fifth. */
   fifth?: boolean;
+  /** Leads may use blue notes. */
+  blueNotes?: boolean;
 }
 
 export const MAX_TRACK_LENGTH = 64;

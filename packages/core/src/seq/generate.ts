@@ -3,7 +3,7 @@ import { clamp, expLerp, lerp } from '../math';
 import { LFO_SHAPES, type LfoSpec } from '../mod/lfo';
 import { PARAM_INFO, TRACK_PARAMS, type TrackParam, type TrackParams } from '../mod/params';
 import type { Rng } from '../random';
-import type { Machine, Palette } from '../styles/schema';
+import type { Machine, Palette, RhythmHint } from '../styles/schema';
 import { euclid } from '../theory/euclid';
 import {
   MAX_TRACK_LENGTH,
@@ -67,6 +67,7 @@ export function generateTrack(rng: Rng, o: GenerateOptions): TrackSpec {
   if (machine.patch.type === 'drum') spec.voice = machine.patch.voice;
   if (machine.pentatonic) spec.pentatonic = true;
   if (machine.fifth) spec.fifth = true;
+  if (machine.blueNotes) spec.blueNotes = true;
   spec.trigs = writePattern(rng, spec, machine, o.density);
   return spec;
 }
@@ -81,15 +82,21 @@ export function writePattern(
   const d = clamp(lerp(machine.density[0], machine.density[1], clamp(density)), 0.02, 1);
   switch (spec.role) {
     case 'drum':
-      return drumPattern(rng, spec, d);
+      return drumPattern(rng, spec, d, machine.rhythm);
     case 'bass':
-      return bassPattern(rng, spec.length, d, machine.maxLen ?? 8);
+      return withSlides(rng, bassPattern(rng, spec.length, d, machine), machine);
     case 'lead':
-      return leadPattern(rng, spec.length, d, machine.maxLen ?? 6);
+      return withSlides(
+        rng,
+        machine.rhythm === 'pulse'
+          ? cellPattern(rng, spec.length)
+          : leadPattern(rng, spec.length, d, machine.maxLen ?? 6, !!machine.blueNotes),
+        machine,
+      );
     case 'arp':
       return arpPattern(rng, spec.length, d);
     case 'chords':
-      return chordPattern(rng, spec.length, d);
+      return chordPattern(rng, spec.length, d, machine.rhythm);
     case 'pad':
       return padPattern(rng, spec.length);
     case 'drone': {
@@ -194,32 +201,91 @@ function drumTrig(rng: Rng, voice: string, index: number): Trig {
   return t;
 }
 
-function drumPattern(rng: Rng, spec: TrackSpec, density: number): (Trig | undefined)[] {
+/** Steps a rhythm template puts hits on, or undefined to use the default Euclidean rhythm. */
+function templateHits(
+  rng: Rng,
+  rhythm: RhythmHint | undefined,
+  n: number,
+  voice: string,
+): boolean[] | undefined {
+  const at = (pred: (i: number) => boolean) => Array.from({ length: n }, (_, i) => pred(i));
+  switch (rhythm) {
+    case 'four':
+      return at((i) => i % 4 === 0);
+    case 'offbeat':
+      return at((i) => i % 4 === 2);
+    case 'backbeat':
+      return at((i) => i % 8 === 4);
+    case 'pulse':
+      return at((i) => i % 2 === 0);
+    case 'ride':
+      // Ding, ding-da, ding, ding-da: 1, 2, 2&, 3, 4, 4&.
+      return at((i) => [0, 4, 6, 8, 12, 14].includes(i % 16));
+    case 'break': {
+      if (voice === 'snare' || voice === 'clap') return at((i) => i % 8 === 4);
+      if (voice === 'kick') {
+        const extra = rng.pick([7, 11, 14]);
+        return at((i) => {
+          const s = i % 16;
+          const second = Math.floor(i / 16) % 2 === 1;
+          return s === 0 || s === 10 || (second && s === extra);
+        });
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function drumPattern(
+  rng: Rng,
+  spec: TrackSpec,
+  density: number,
+  rhythm?: RhythmHint,
+): (Trig | undefined)[] {
   const n = spec.length;
   const voice = spec.voice ?? 'perc';
   const k = clamp(Math.round(density * n), 1, n);
   let hits: boolean[];
-  switch (voice) {
-    case 'kick':
-      hits = euclid(k, n, 0);
-      break;
-    case 'snare':
-    case 'clap':
-      if (n % 4 === 0 && n >= 8 && rng.chance(0.7)) {
-        hits = Array.from({ length: n }, (_, i) => i === n / 4 || i === (3 * n) / 4);
-        if (k > 2) euclid(k - 2, n, rng.int(0, n - 1)).forEach((h, i) => (hits[i] ||= h));
-      } else {
-        hits = euclid(k, n, rng.int(1, n - 1));
-      }
-      break;
-    case 'ohat':
-      // Off-beats.
-      hits = euclid(k, n, n > 2 ? -2 : 0);
-      break;
-    default:
-      hits = euclid(k, n, rng.int(0, n - 1));
-  }
+  const template = templateHits(rng, rhythm, n, voice);
+  if (template) {
+    hits = template;
+    // A few extra hits on busier patterns, never more than the template itself.
+    const extra = Math.max(0, k - hits.filter(Boolean).length);
+    if (extra > 0 && rhythm !== 'ride') {
+      euclid(Math.min(extra, Math.ceil(n / 8)), n, rng.int(0, n - 1)).forEach(
+        (h, i) => (hits[i] ||= h),
+      );
+    }
+  } else
+    switch (voice) {
+      case 'kick':
+        hits = euclid(k, n, 0);
+        break;
+      case 'snare':
+      case 'clap':
+        if (n % 4 === 0 && n >= 8 && rng.chance(0.7)) {
+          hits = Array.from({ length: n }, (_, i) => i === n / 4 || i === (3 * n) / 4);
+          if (k > 2) euclid(k - 2, n, rng.int(0, n - 1)).forEach((h, i) => (hits[i] ||= h));
+        } else {
+          hits = euclid(k, n, rng.int(1, n - 1));
+        }
+        break;
+      case 'ohat':
+        // Off-beats.
+        hits = euclid(k, n, n > 2 ? -2 : 0);
+        break;
+      default:
+        hits = euclid(k, n, rng.int(0, n - 1));
+    }
   const trigs: (Trig | undefined)[] = hits.map((h, i) => (h ? drumTrig(rng, voice, i) : undefined));
+  if (rhythm === 'ride') {
+    // The ride leans on 2 and 4.
+    trigs.forEach((t, i) => {
+      if (t) t.vel = i % 8 === 4 ? rng.range(0.85, 1) : rng.range(0.5, 0.7);
+    });
+  }
 
   // Ghost notes on the snare and hats.
   if (voice === 'snare' || voice === 'hat' || voice === 'shaker') {
@@ -253,9 +319,15 @@ function bassNote(rng: Rng, index: number, approach: boolean): Trig['note'] {
   return approach ? { ...note, approach: true } : note;
 }
 
-function bassPattern(rng: Rng, n: number, density: number, maxLen: number): (Trig | undefined)[] {
+function bassPattern(rng: Rng, n: number, density: number, machine: Machine): (Trig | undefined)[] {
+  const maxLen = machine.maxLen ?? 8;
+  if (machine.rhythm === 'walking') return walkingBass(rng, n);
   const k = clamp(Math.round(density * n), 1, n);
-  const hits = euclid(k, n, 0);
+  const hits =
+    machine.rhythm === 'pulse' || machine.rhythm === 'offbeat' || machine.rhythm === 'four'
+      ? (templateHits(rng, machine.rhythm, n, 'bass') as boolean[])
+      : euclid(k, n, 0);
+  if (machine.rhythm === 'offbeat') hits[0] = true;
   const at = hits.flatMap((h, i) => (h ? [i] : []));
   const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
   at.forEach((i, j) => {
@@ -271,7 +343,68 @@ function bassPattern(rng: Rng, n: number, density: number, maxLen: number): (Tri
   return decorate(rng, trigs, rng.range(0.05, 0.2), { anchor: 0 });
 }
 
-function leadPattern(rng: Rng, n: number, density: number, maxLen: number): (Trig | undefined)[] {
+/** A note on every beat: root on 1, chord tones on 2 and 3, a step into the next chord on 4. */
+function walkingBass(rng: Rng, n: number): (Trig | undefined)[] {
+  const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i += 4) {
+    const beat = (i / 4) % 4;
+    const note =
+      beat === 0
+        ? { tone: 0, chord: true, oct: 0 }
+        : beat === 3
+          ? { tone: rng.pick([1, 2]), chord: true, oct: 0, approach: true }
+          : { tone: rng.pick([1, 2, 3]), chord: true, oct: rng.chance(0.15) ? 1 : 0 };
+    trigs[i] = trig(1, 3.6, {
+      note,
+      vel: beat === 0 ? rng.range(0.8, 0.92) : rng.range(0.65, 0.82),
+    });
+  }
+  return trigs;
+}
+
+/** Some notes slide into the next one, and some are accented: the acid/808 feel. */
+function withSlides(rng: Rng, trigs: (Trig | undefined)[], machine: Machine): (Trig | undefined)[] {
+  const chance = machine.slide ?? 0;
+  if (chance <= 0) return trigs;
+  let first = true;
+  for (const t of trigs) {
+    if (!t) continue;
+    if (!first && rng.chance(chance)) t.slide = true;
+    if (rng.chance(0.25)) t.vel = Math.max(t.vel, 0.95);
+    first = false;
+  }
+  return trigs;
+}
+
+/**
+ * Minimal: a short cell of eighth notes on a few scale tones, repeated for
+ * the whole track. Against other tracks of other lengths, cells drift apart
+ * and back (phasing).
+ */
+function cellPattern(rng: Rng, n: number): (Trig | undefined)[] {
+  const cell = rng.pick([6, 8, 10, 12]);
+  const tones = Array.from({ length: cell / 2 }, () => rng.pick([0, 1, 2, 4, 5, 7]));
+  const rests = Array.from({ length: cell / 2 }, () => rng.chance(0.2));
+  rests[0] = false;
+  const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i += 2) {
+    const j = ((i % cell) / 2) | 0;
+    if (rests[j]) continue;
+    trigs[i] = trig(1, 1.8, {
+      note: { tone: tones[j] as number, chord: false, oct: 0 },
+      vel: j === 0 ? 0.8 : rng.range(0.55, 0.7),
+    });
+  }
+  return trigs;
+}
+
+function leadPattern(
+  rng: Rng,
+  n: number,
+  density: number,
+  maxLen: number,
+  blue: boolean,
+): (Trig | undefined)[] {
   const syncopation = rng.range(0.2, 0.9);
   const positions: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -297,8 +430,11 @@ function leadPattern(rng: Rng, n: number, density: number, maxLen: number): (Tri
     const next = positions[j + 1] ?? n;
     // Second half answers the first, a step or two away.
     const tone = deg + (n >= 16 && i >= n / 2 ? answer : 0);
-    trigs[i] = trig(1, Math.max(1, Math.min(maxLen, next - i)), {
-      note: { tone, chord: false, oct: 0 },
+    const len = Math.max(1, Math.min(maxLen, next - i));
+    // Blue notes go on short off-beat notes, which then resolve by a semitone.
+    const bend = blue && i % 2 === 1 && len < 4 && rng.chance(0.35);
+    trigs[i] = trig(1, len, {
+      note: { tone, chord: false, oct: 0, ...(bend ? { blue: true } : {}) },
       vel: clamp(0.55 + 0.3 * beatStrength(i % 16) + rng.range(-0.05, 0.1)),
     });
   });
@@ -342,14 +478,36 @@ function arpPattern(rng: Rng, n: number, density: number): (Trig | undefined)[] 
   return decorate(rng, trigs, rng.range(0.05, 0.2), { anchor: 0 });
 }
 
-function chordPattern(rng: Rng, n: number, density: number): (Trig | undefined)[] {
+function chordPattern(
+  rng: Rng,
+  n: number,
+  density: number,
+  rhythm?: RhythmHint,
+): (Trig | undefined)[] {
   const k = clamp(Math.round(density * n), 1, n);
-  const hits = euclid(k, n, 0);
+  let hits: boolean[];
+  let stab = false;
+  switch (rhythm) {
+    case 'charleston':
+      // On 1 and the "and" of 2, sometimes pushing into the next bar.
+      hits = Array.from({ length: n }, (_, i) => i % 16 === 0 || i % 16 === 6);
+      if (density > 0.5) hits.forEach((_, i) => (hits[i] ||= i % 16 === 14 && rng.chance(0.4)));
+      stab = true;
+      break;
+    case 'offbeat':
+    case 'pulse':
+      hits = templateHits(rng, rhythm, n, 'chords') as boolean[];
+      stab = true;
+      break;
+    default:
+      hits = euclid(k, n, 0);
+  }
   const at = hits.flatMap((h, i) => (h ? [i] : []));
   const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
   at.forEach((i, j) => {
     const next = at[j + 1] ?? n;
-    trigs[i] = trig(1, Math.max(1, (next - i) * rng.range(0.5, 1)), {
+    const len = stab ? rng.range(0.8, 1.6) : Math.max(1, (next - i) * rng.range(0.5, 1));
+    trigs[i] = trig(1, len, {
       note: { tone: 0, chord: true, oct: 0 },
       vel: rng.range(0.45, 0.7),
     });

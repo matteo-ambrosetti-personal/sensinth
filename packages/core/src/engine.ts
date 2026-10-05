@@ -22,8 +22,8 @@ import { Realizer, type HarmonyContext } from './seq/realize';
 import { TrackRunner, type FiredTrig } from './seq/runner';
 import type { TrackRole, TrackSpec, Trig } from './seq/types';
 import { SensorHub, type ChannelState } from './sensors/hub';
-import type { Machine, Style } from './styles/schema';
-import { chordSymbol, type Chord } from './theory/chords';
+import type { FxConfig, Machine, Style } from './styles/schema';
+import type { Chord } from './theory/chords';
 import type { ModeId, Scale } from './theory/scales';
 
 export interface EngineOptions {
@@ -184,6 +184,11 @@ export class Engine {
     return this.harmony?.chord;
   }
 
+  /** The key's root pitch class, once the music has started. */
+  get key(): number | undefined {
+    return this.harmony?.root;
+  }
+
   /** True while no sensor is live, so nothing plays. */
   get isWaiting(): boolean {
     return this.waiting;
@@ -192,6 +197,11 @@ export class Engine {
   /** Switches style at the next bar line. */
   setStyle(style: Style): void {
     this.pendingStyle = style;
+  }
+
+  /** Effects in effect: the genome's choice (Free mode) or the style's. */
+  get fx(): FxConfig {
+    return this.genome?.fx ?? this.style.fx;
   }
 
   /** Every track's slot and machine, for the renderer. */
@@ -236,9 +246,8 @@ export class Engine {
   snapshot(): EngineSnapshot {
     const step = Math.max(0, this.step - 1);
     const h = this.harmony;
-    const scale = h?.scale;
     const chord = h?.chord ?? { degree: 0, size: 3 };
-    const sym = scale ? chordSymbol(scale, chord) : { roman: '–', name: '–' };
+    const sym = h ? h.chordLabel : { roman: '–', name: '–' };
     const rel = Math.max(0, step - this.sectionStart);
     const phraseBars = Math.max(1, this.style.palette.phraseBars);
     return {
@@ -246,7 +255,7 @@ export class Engine {
       bar: Math.floor(step / STEPS_PER_BAR),
       beat: Math.floor((step % STEPS_PER_BAR) / STEPS_PER_BEAT),
       styleId: this.style.id,
-      keyName: scale?.name ?? '–',
+      keyName: h?.keyName ?? '–',
       mode: h?.mode ?? 'ionian',
       chord,
       chordRoman: sym.roman,
@@ -449,7 +458,9 @@ export class Engine {
     const h: HarmonyContext = {
       scale: harmony.scale,
       chord: harmony.chord,
-      nextChord: harmony.next,
+      nextRoot: harmony.nextRoot,
+      chordMoves: harmony.chordMoves,
+      key: harmony.root,
       stepsUntilChordChange: chordSteps - (rel % chordSteps),
       stepInBar,
     };
@@ -560,6 +571,7 @@ export class Engine {
       params: locked,
       ...(Math.abs(f.micro) > 1e-6 ? { micro: f.micro } : {}),
       ...(f.retrig ? { retrig: f.retrig } : {}),
+      ...(trig.slide ? { slide: true } : {}),
     };
     if (spec.role === 'drum') return [{ ...base, voice: spec.voice ?? 'perc' }];
     return realizer.notes(spec, trig.note, h, locked.tune, len).map((midi) => ({ ...base, midi }));

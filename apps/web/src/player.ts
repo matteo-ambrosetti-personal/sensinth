@@ -119,6 +119,7 @@ export class Player {
       }
       if (this.engine.genomeVersion !== version) {
         version = this.engine.genomeVersion;
+        renderer.setFx(this.engine.fx);
         renderer.setTracks(this.engine.trackMachines());
       }
       const view = this.engine.view();

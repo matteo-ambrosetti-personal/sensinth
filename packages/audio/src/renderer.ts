@@ -6,6 +6,7 @@ import {
   neutralParams,
   stepDuration,
   swingOffset,
+  type FxConfig,
   type GlobalParams,
   type Machine,
   type Macros,
@@ -16,6 +17,7 @@ import {
 import { createImpulse, createSoftClipCurve } from './fx/reverb';
 import { DrumMachine } from './instruments/drums';
 import { FmInstrument } from './instruments/fm';
+import { OrganInstrument } from './instruments/organ';
 import { PadInstrument } from './instruments/pad';
 import { TonalInstrument } from './instruments/tonal';
 import type { Instrument } from './instruments/types';
@@ -78,7 +80,8 @@ const MAX_DRIVE = 8;
 export class Renderer {
   private tracks = new Map<string, TrackChain>();
   private readonly muted = new Set<string>();
-  private style: Style;
+  /** Effects in effect: the style's, or the genome's pick in Free mode. */
+  private fx: FxConfig;
   private swing = 0.5;
   private stepSeconds = stepDuration(120);
   private readonly waves: WaveTable;
@@ -104,7 +107,7 @@ export class Renderer {
     style: Style,
     destination: AudioNode = ctx.destination,
   ) {
-    this.style = style;
+    this.fx = style.fx;
     this.waves = new WaveTable(ctx);
     this.noise = createNoiseBuffer(ctx);
     this.driveCurve = createSoftClipCurve(2);
@@ -178,8 +181,13 @@ export class Renderer {
 
   /** Effects for a style; its tracks arrive through `setTracks`. */
   setStyle(style: Style): void {
-    this.style = style;
-    this.setReverbLength(style.fx.reverbSeconds ?? DEFAULT_REVERB_SECONDS);
+    this.setFx(style.fx);
+  }
+
+  /** Switches effects (reverb tail, delay time, crackle, wobble, …) without touching the tracks. */
+  setFx(fx: FxConfig): void {
+    this.fx = fx;
+    this.setReverbLength(fx.reverbSeconds ?? DEFAULT_REVERB_SECONDS);
     this.setTempo(60 / (this.stepSeconds * 4));
   }
 
@@ -227,7 +235,7 @@ export class Renderer {
   setTempo(bpm: number): void {
     this.stepSeconds = stepDuration(bpm);
     this.delay.delayTime.setTargetAtTime(
-      Math.min(1.9, this.style.fx.delaySteps * this.stepSeconds),
+      Math.min(1.9, this.fx.delaySteps * this.stepSeconds),
       this.ctx.currentTime,
       0.05,
     );
@@ -236,7 +244,7 @@ export class Renderer {
   /** Follows the engine: master filter, sends, wobble, crackle and every track's params. */
   update(state: RenderState, time: number): void {
     this.swing = state.swing;
-    const { fx } = this.style;
+    const { fx } = this;
     const { globals, macros } = state;
     const t = Math.max(time, this.ctx.currentTime);
     this.filter.frequency.setTargetAtTime(
@@ -273,7 +281,7 @@ export class Renderer {
    * micro timing, retrigs and humanizing are applied here.
    */
   schedule(events: readonly NoteEvent[], gridTime: number, stepSeconds = this.stepSeconds): void {
-    const humanize = this.style.fx.humanize ?? 0;
+    const humanize = this.fx.humanize ?? 0;
     for (const ev of events) {
       const chain = this.tracks.get(ev.part);
       if (!chain) continue;
@@ -370,6 +378,8 @@ export class Renderer {
         return new FmInstrument(this.ctx, patch, this.wobble);
       case 'pad':
         return new PadInstrument(this.ctx, patch, this.wobble);
+      case 'organ':
+        return new OrganInstrument(this.ctx, patch, this.wobble);
       case 'drum':
         return new DrumMachine(this.ctx, this.noise, patch.voice, patch.flavor);
     }
