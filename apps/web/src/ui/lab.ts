@@ -200,6 +200,9 @@ export const SOURCE_NAMES: Record<string, string> = {
   replay: 'Replay',
   computer: 'Pointer & keys',
   native: 'Phone (native)',
+  mac: 'Mac',
+  controller: 'Game controllers',
+  midi: 'MIDI',
 };
 
 function nearest(samples: readonly LabSample[], t: number): LabSample | undefined {

@@ -13,13 +13,17 @@ import { Player } from './player';
 import { loadPrefs, savePrefs, type Prefs } from './prefs';
 import { CameraSource } from './sensors/camera';
 import { DeviceSource } from './sensors/device';
+import { GamepadSource } from './sensors/gamepad';
+import { LidAngleSource } from './sensors/lid';
 import { LightSource } from './sensors/light';
 import { LocationSource } from './sensors/location';
 import { SourceManager } from './sensors/manager';
 import { MicrophoneSource } from './sensors/microphone';
+import { MidiSource } from './sensors/midi';
 import { MotionSource } from './sensors/motion';
 import { NativeSensorsSource, isNativeApp } from './sensors/native';
 import { PointerSource } from './sensors/pointer';
+import { ComputePressureSource } from './sensors/pressure';
 import { ReplayWebSource, formatDuration } from './sensors/replay';
 import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
@@ -123,6 +127,10 @@ const sources = new SourceManager(player.hub, [
   new NativeSensorsSource(),
   // In the app, the native source reads the real light sensor instead.
   ...(isNativeApp() ? [] : [new LightSource()]),
+  new LidAngleSource(),
+  new ComputePressureSource(),
+  new GamepadSource(),
+  new MidiSource(),
   new SimulatedWebSource(),
 ]);
 const sourcesView = new SourcesView($('sources'), sources, (id, on) => void toggleSource(id, on));
