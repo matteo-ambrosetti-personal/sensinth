@@ -34,10 +34,20 @@ recorded walk replays on desktop. The browser tests cover the first and third wi
 motion events and recordings; the camera mapping is unit-tested. A walk with a real phone is the
 remaining check.
 
-## Phase 3: musicality and styles (next)
+## Phase 3: styles, apps and the Sensor lab (done)
 
-Ambient and Lo-fi styles, sections with arrangement changes (breaks, builds), and recording audio
-clips to share.
+- **Ambient:** a drone under slow pads, a sparse pentatonic bell melody, deep reverb, and a soft
+  rim pulse only at high energy.
+- **Lo-fi:** swung boom-bap drums, electric-piano 7th and 9th chords, sub bass, vinyl crackle,
+  tape wobble and humanized timing.
+- New instruments: two-operator FM (keys, bells), detuned pads, a lo-fi drum kit.
+- **Sensor lab:** one sensor at a time, raw and processed, with solo.
+- **Android app** (Capacitor) with a native plugin for light, pressure, temperature and humidity,
+  built by CI and published as the _Sensinth for Android (latest)_ release.
+- **Mac:** installable web app; Pointer & keys source; WebKit (Safari engine) browser tests in CI.
+
+Lo-fi chords stay diatonic: a borrowed iv chord would break the "every note in key" guarantee and
+needs a notion of temporary scales first.
 
 ## Phase 4: Pico sensor node
 
@@ -53,16 +63,16 @@ sensors directly, and starts on boot.
 
 ## Later
 
-MIDI out, more styles, a native Android wrapper (Capacitor) for the light, barometer and humidity
-sensors browsers hide and for playing with the screen off, a mapping editor, several devices
-playing in sync.
+Recording the music to an audio file and sharing it, sections with arrangement changes (breaks,
+builds), borrowed chords, MIDI out, more styles, playing with the screen off (a foreground service
+in the Android app), a mapping editor, several devices playing in sync.
 
 ## Known limits of phone browsers
 
 - Chrome on Android hides the ambient light sensor and magnetometer behind a flag and does not
-  expose the barometer at all. The camera stands in for light; the Pico node will supply pressure,
-  temperature and humidity.
+  expose the barometer at all. The Android app reads them natively; in the browser the camera
+  stands in for light.
 - The microphone hears the phone's own speaker. Echo cancellation and the drum-hit gate reduce
   this; headphones remove it.
-- Sensors and audio stop when the screen turns off. The app holds a screen wake lock while
-  playing.
+- Sensors and audio stop when the screen turns off. The web app holds a screen wake lock while
+  playing; the Android app keeps the screen on while open.

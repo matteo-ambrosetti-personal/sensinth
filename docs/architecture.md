@@ -119,9 +119,11 @@ and optional mapping rules. Parts come in five roles:
 - `LookaheadScheduler` wakes every 25 ms and schedules every step due in the next 120 ms on the
   audio clock. After a stall it skips ahead instead of bursting late notes.
 - `Renderer` builds an instrument per part from its patch: band-limited pulse waves with
-  selectable duty, basic oscillators with optional detune and delayed vibrato, and an 8-bit drum
-  kit. The mix has per-part gain and pan, reverb and tempo-synced delay sends, a master low-pass
-  following brightness, a compressor and a soft clipper.
+  selectable duty, basic oscillators with optional detune and delayed vibrato, two-operator FM
+  (electric piano, bells), detuned pads with an opening filter, and two synthesized drum kits
+  (8-bit, lo-fi). The mix has per-part gain and pan, reverb (tail length per style) and
+  tempo-synced delay sends, vinyl crackle, a tape-wobble LFO on every tonal voice, humanized
+  timing, a master low-pass following brightness, a compressor and a soft clipper.
 - `renderOffline` renders with an `OfflineAudioContext` for tests and clip export.
 
 The renderer uses only the standard Web Audio API, so on a Raspberry Pi it can run under Node
@@ -154,3 +156,23 @@ within 300 ms after one of our own drum hits do not raise triggers.
 `parseRecording` validates a file; `ReplaySource` plays it back in order, looping, with channel ids
 prefixed `replay:` so they never clash with live ones. Replaying a recording into the engine is
 deterministic, which makes recordings the way to tune styles with real data.
+
+### Sensor lab
+
+`ChannelState.debug` exposes each channel's normalized value before smoothing and the raw-unit
+window currently mapped onto 0..1, next to the features. The lab records the selected channel
+through a hub tap into a 15-second history and draws two canvas charts (`ui/labChart.ts`): the raw
+reading on an auto-scaled axis, and normalized, level, activity and onsets on 0..1. Trend is shown
+as a number, since it lives on −1..1. `Router.setSolo(id)` makes one channel the only one driving
+dials and triggers; the others rest at their defaults.
+
+### Android app (`apps/web/android`)
+
+Capacitor wraps the same web build (`pnpm build:native`: base `/`, no service worker). The WebView
+already turns camera, microphone and location requests into Android permission prompts.
+`SensorsPlugin.java` reads light, pressure, ambient temperature and humidity from `SensorManager`
+and sends `reading` events; `sensors/native.ts` turns them into channels with the shared kinds, so
+the default mapping applies (light → brightness, falling pressure → tension, humidity → space).
+`MainActivity` keeps the screen on. CI (`.github/workflows/android.yml`) builds the APK, signed
+with a committed test key so updates install over each other, and publishes it as the
+`android-latest` pre-release.
