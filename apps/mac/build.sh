@@ -21,7 +21,7 @@ rm -rf "$OUT"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 for arch in arm64 x86_64; do
-  echo "Compiling for $arch…"
+  echo "Compiling for ${arch}..."
   swiftc -O -swift-version 5 -target "$arch-apple-macos$MIN_MACOS" \
     -o "$OUT/Sensinth-$arch" Sources/*.swift "${FRAMEWORKS[@]}"
   swiftc -O -swift-version 5 -target "$arch-apple-macos$MIN_MACOS" \
