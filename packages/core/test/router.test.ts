@@ -20,6 +20,26 @@ describe('Router', () => {
     expect(router.macros.brightness).toBeGreaterThan(0.95);
   });
 
+  it('darkens the music when the camera is covered', () => {
+    const hub = new SensorHub();
+    hub.announce({
+      id: 'cam',
+      kind: 'camera.luma',
+      label: 'Camera',
+      range: [0, 1],
+      adaptive: true,
+      minSpan: 0.15,
+    });
+    const router = new Router(hub);
+    feed(hub, 'cam', (t) => 0.45 + 0.05 * Math.sin(t), 20);
+    for (let i = 0; i < 200; i++) router.update(0.05);
+    const open = router.macros.brightness;
+    feed(hub, 'cam', () => 0.01, 4, 20.05);
+    for (let i = 0; i < 200; i++) router.update(0.05);
+    expect(open).toBeGreaterThan(0.4);
+    expect(router.macros.brightness).toBeLessThan(0.1);
+  });
+
   it('auto-assigns unknown sensors by timescale', () => {
     const hub = new SensorHub();
     hub.announce({ id: 'pico.soil', kind: 'soil.moisture', label: 'Soil', timescale: 'slow' });

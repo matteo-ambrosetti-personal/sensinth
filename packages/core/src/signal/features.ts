@@ -20,8 +20,9 @@ interface Preset {
 }
 
 const PRESETS: Record<Timescale, Preset> = {
+  // Fast channels skip the median: a one-sample spike (a clap, a tap) is the signal.
   fast: {
-    median: 3,
+    median: 1,
     minCutoff: 3,
     beta: 4,
     relaxTau: 20,

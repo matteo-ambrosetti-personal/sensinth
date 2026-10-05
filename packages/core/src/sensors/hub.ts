@@ -24,6 +24,13 @@ export interface OnsetEvent {
 
 const MAX_PENDING_ONSETS = 32;
 
+/** Observes what flows through a hub, e.g. a recorder. */
+export interface HubListener {
+  announce?(desc: SensorDescriptor): void;
+  push?(sample: SensorSample): void;
+  remove?(id: string): void;
+}
+
 /**
  * Collects every sensor channel, from any source, and keeps its features up
  * to date. Sources call `announce` once per channel, then `push` samples.
@@ -31,8 +38,20 @@ const MAX_PENDING_ONSETS = 32;
 export class SensorHub {
   private readonly channels = new Map<string, { state: ChannelState; fx: FeatureExtractor }>();
   private pending: OnsetEvent[] = [];
+  private readonly listeners = new Set<HubListener>();
   /** Increments whenever channels are added or removed. */
   version = 0;
+  /**
+   * Decides whether an onset on a channel may raise triggers. Used to ignore
+   * the microphone hearing the music's own drum hits.
+   */
+  onsetGate: ((id: string, t: number) => boolean) | undefined;
+
+  /** Registers a listener; returns a function that removes it. */
+  tap(listener: HubListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   announce(desc: SensorDescriptor): void {
     const timescale = timescaleOf(desc);
@@ -49,10 +68,13 @@ export class SensorHub {
       fx: new FeatureExtractor(desc, timescale),
     });
     this.version++;
+    for (const l of this.listeners) l.announce?.(desc);
   }
 
   remove(id: string): void {
-    if (this.channels.delete(id)) this.version++;
+    if (!this.channels.delete(id)) return;
+    this.version++;
+    for (const l of this.listeners) l.remove?.(id);
   }
 
   /** Feeds one sample. Samples for unknown channels or going back in time are ignored. */
@@ -66,7 +88,8 @@ export class SensorHub {
     state.raw = sample.v;
     state.lastT = sample.t;
     state.stale = false;
-    if (state.features.onset > 0) {
+    for (const l of this.listeners) l.push?.(sample);
+    if (state.features.onset > 0 && (this.onsetGate?.(sample.id, sample.t) ?? true)) {
       state.lastOnsetT = sample.t;
       this.pending.push({ id: sample.id, t: sample.t, strength: state.features.onset });
       if (this.pending.length > MAX_PENDING_ONSETS) this.pending.shift();
@@ -77,10 +100,15 @@ export class SensorHub {
     for (const s of samples) this.push(s);
   }
 
-  /** Marks channels with no sample in the last `timeout` seconds as stale. */
+  /**
+   * Marks channels with no sample in the last `timeout` seconds as stale.
+   * Slow channels get at least three of their sample periods.
+   */
   markStale(now: number, timeout = 5): void {
     for (const { state } of this.channels.values()) {
-      state.stale = now - state.lastT > timeout;
+      const rate = state.desc.rateHz;
+      const limit = rate && rate > 0 ? Math.max(timeout, 3 / rate) : timeout;
+      state.stale = now - state.lastT > limit;
     }
   }
 
