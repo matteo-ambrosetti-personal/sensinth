@@ -1,18 +1,24 @@
 # Sensinth
 
-Generative music from sensor signals. You choose the **tempo** and the **style**; everything else
-(melody, bass, chords, drums, timbre, effects) comes from sensors. The engine keeps the result in
-key, on the beat and structured in phrases, so it stays listenable whatever the sensors do.
+Generative music from sensor signals. You choose the **tempo** and the **style**; the sensors write
+everything else: which instruments play, every track's pattern, how the tracks modulate each
+other, the key and the mode. No sensor, no music. The engine keeps the result in key, on the beat
+and structured in phrases, so it stays listenable whatever the sensors do.
 
 It runs on an Android phone (as an app or in Chrome) and on a Mac (as an installable web app). The
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3. Three styles (Chiptune, Ambient, Lo-fi) play from your phone's motion,
-tilt, compass, microphone, camera, location, clock and battery, and in the Android app also from
-its light, pressure, temperature and humidity sensors. On a laptop, the trackpad and keyboard
-stand in for motion. The **Sensor lab** shows one sensor at a time, raw and processed, and can
-let it drive the music alone. See [docs/roadmap.md](docs/roadmap.md).
+**Status:** Phase 3.5. Three styles (Chiptune, Ambient, Lo-fi) are sound palettes that the sensors
+compose in, like a Digitakt played by your surroundings: tracks with their own lengths, trig
+conditions, parameter locks and LFOs, and a modulation matrix where sensors, LFOs and chaos maps
+move each other. A different place, light or colour rewrites the track; even a tiny change in a
+reading changes the next phrase, and nothing repeats. The **Tracks** panel shows each track's
+waveform, steps and parameters (with Mute), the **Modulation** panel every live routing. Sources:
+your phone's motion, tilt, compass, microphone, camera, location, clock and battery, and in the
+Android app its light, pressure, temperature and humidity sensors; on a laptop, the trackpad and
+keyboard. The **Sensor lab** shows one sensor at a time, raw and processed. See
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Get it
 
@@ -50,18 +56,29 @@ it.
 ## How it works
 
 ```
-Sensors → signal processing → features → musical dials → composer → note events → synth → audio
+                                     ┌─► genome: machines, patterns, lengths, routings, key   (every section, or a new scene)
+Sensors → signal processing → ───────┼─► phrase mutations                                     (every phrase)
+          features                   ├─► modulation matrix ⇄ LFOs, chaos maps, track hits    (every step)
+                                     └─► dials: energy, tension, brightness, …
+                        tracks (step sequencer) → harmony keeper → per-track synths → audio
 ```
 
 1. **Signal processing** cleans each channel (spike removal, smoothing) and scales it to 0..1 by
-   learning its range, so any sensor works without calibration.
-2. **Features**: level, trend, activity (how much it moves) and onsets (sudden events).
-3. **Musical dials** (energy, tension, brightness, space, variation, texture, register, color) are
-   driven by sensor features through a mapping. Unknown sensors are assigned automatically by how
-   fast they change.
-4. **The composer** picks key, mode, chords, rhythms and melody. Sensors never set a pitch
-   directly: every note is snapped to the current scale and to the 16th-note grid, strong beats
-   land on chord tones, and melodies repeat and vary a remembered motif.
+   learning its range, so any sensor works without calibration. Features: level, trend, activity
+   (how much it moves) and onsets.
+2. **The genome.** A fingerprint of every live sensor, through a hash chain, writes each 16-bar
+   section: which machines play, each track's length, speed, pattern and sound, the routings, the
+   modes and chord rate. When the surroundings change (place, light, the colour in front of the
+   camera, a sensor switched on), it is rewritten at the next bar.
+3. **Every phrase mutates**, seeded by the fine detail of the readings: trigs, locks, conditions,
+   notes and routes change a little. Frozen sensors still never repeat.
+4. **Tracks** work like an Elektron sequencer: their own length and speed, trig conditions (1:2,
+   fill, pre, nei, first), probabilities, micro timing, retrigs and parameter locks.
+5. **The modulation matrix**: sensor features, dials, an LFO per track, two chaos maps and track
+   hits modulate every track parameter, the LFOs and each other. Every sensor has at least two
+   strong routes.
+6. **The harmony keeper**: sensors never set a pitch directly. Every note is realized against the
+   current scale and chord, on the 16th-note grid, with chord tones on strong beats.
 
 Details: [docs/architecture.md](docs/architecture.md).
 
@@ -74,9 +91,17 @@ pnpm install
 pnpm dev          # http://localhost:5173
 ```
 
-Press play. On a computer the pointer and keyboard drive the dials and the music; on a phone,
-motion and tilt are on from the start. Turn on more sources (microphone, camera, location,
-simulated sensors) in the Sources panel.
+Press play. On a computer the pointer, keyboard and clock drive the music; on a phone, motion,
+tilt and the clock are on from the start. Turn on more sources (microphone, camera, location,
+simulated sensors) in the Sources panel; with every source off, Play waits for one.
+
+**Tracks** shows each track as it plays: its machine, length and speed, its own waveform, its
+steps (shade = velocity, purple dot = parameter lock, dashed outline and label = trig condition or
+probability, ticks = retrig, square outline = playhead) and its live parameters, where the bar is
+the value now and the tick is where the genome set it. **Mute** silences a track without changing
+where the music goes. **Modulation** lists every route, grouped by source, with a bar showing
+what it adds right now. The card under Play shows the section, the genome's id, where the key came
+from and why the tracks were last rewritten.
 
 **Sensor lab** (top right) tests one sensor at a time: pick it, and two live charts show its raw
 reading in its own units and what the engine makes of it (normalized value, smoothed level,
@@ -133,7 +158,8 @@ docs/            Architecture, roadmap, sensor protocol.
 
 ## Adding a style
 
-A style is data. Copy `packages/core/src/styles/chiptune.ts`, change the modes, chord-progression
-table, patterns, instrument patches and effects, and register it in
+A style is data: a palette of machines (sounds with ranges for their patterns and parameters),
+which roles are always there, the modes, chord-progression table, track lengths and limits, plus
+effects. Copy `packages/core/src/styles/chiptune.ts`, change it, and register it in
 `packages/core/src/styles/index.ts`. The tests run every registered style through the harmony
-checks automatically.
+checks and the browser render test automatically.

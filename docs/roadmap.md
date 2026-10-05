@@ -49,6 +49,32 @@ remaining check.
 Lo-fi chords stay diatonic: a borrowed iv chord would break the "every note in key" guarantee and
 needs a notion of temporary scales first.
 
+## Phase 3.5: sensor-driven tracks (done)
+
+Sensors used to nudge a fixed base: every style had fixed patterns and sounds, and with every
+sensor off the music sounded almost the same. Now the sensors write the music:
+
+- **No sensor, no music.** Play needs a source; the music starts once a channel sends.
+- **Genome:** a fingerprint of the sensors, through a hash chain, writes each 16-bar section:
+  machines, tracks, patterns, lengths, routings, modes, chord rate, swing. A new scene (another
+  place, another light or colour, a sensor switched on or off) rewrites it early.
+- **Every phrase mutates**, seeded by the fine fingerprint: one digit of difference in a reading
+  gives a different phrase, and frozen sensors still never repeat.
+- **Elektron-style tracks:** per-track length and speed (polymeter), trig conditions,
+  probabilities, micro timing, retrigs, parameter locks and an LFO per track.
+- **Modulation matrix:** sensors, dials, LFOs, chaos maps and track hits modulate every track
+  param, LFO rates and depths, chaos rates and global tension, brightness, swing and space, with
+  feedback loops. Every sensor has at least two strong routes.
+- **Styles are palettes** of machines, modes, lengths and limits.
+- **Per-track audio:** filter, drive, level, pan, sends, analyser and mute per track; parametric
+  drum voices.
+- **UI:** a Tracks panel (scope, step grid, live params, mute per track), a Modulation panel with
+  live routes, and a genome card.
+
+Tests check that a 2% difference in one sensor changes most bars, that frozen sensors never repeat
+a phrase over 128 bars, that there is silence without sensors, determinism, and the harmony rules
+for every palette.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /
@@ -63,8 +89,8 @@ sensors directly, and starts on boot.
 
 ## Later
 
-Recording the music to an audio file and sharing it, sections with arrangement changes (breaks,
-builds), borrowed chords, MIDI out, more styles, playing with the screen off (a foreground service
+Recording the music to an audio file and sharing it, arrangement changes (breaks, builds),
+borrowed chords, MIDI out, more styles, editing a genome by hand (locking a track you like), playing with the screen off (a foreground service
 in the Android app), a mapping editor, several devices playing in sync.
 
 ## Known limits of phone browsers
