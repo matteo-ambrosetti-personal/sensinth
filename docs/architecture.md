@@ -310,6 +310,15 @@ Location adds a `geo.place` channel: a hash of the ≈500 m cell, as a value 0..
 another place changes the fingerprint (a new scene), and the cell also picks the key of each new
 piece. Coordinates never leave the phone.
 
+Browser-only extras, each feature-detected: `lid.ts` (WebHID: feature report 1 of Apple's
+sensor-hub device `05ac:8104` holds the hinge angle), `pressure.ts` (Compute Pressure states as
+CPU load), `gamepad.ts` (each axis and analog trigger, plus the buttons held), `midi.ts` (each CC
+and the pitch bend, announced when first moved, plus key velocities) and a press-force channel in
+`pointer.ts` (Safari's `webkitForce`, pen pressure elsewhere). About 25 sensor kinds cover hinges,
+covers, the body and the machine (`lid.angle`, `proximity`, `cover`, `steps.rate`, `thermal`,
+`cpu.load`, `wifi.rssi`, `idle`, …) with default dials and triggers; knobs and sticks get no fixed
+rule, so the timescale router spreads them over different dials.
+
 ### Recordings
 
 `SensorRecorder` taps the hub and stores descriptors plus `[t, channel, value]` samples;
@@ -330,9 +339,34 @@ the music: dials, triggers, the fingerprint and the matrix.
 
 Capacitor wraps the same web build (`pnpm build:native`: base `/`, no service worker). The WebView
 already turns camera, microphone and location requests into Android permission prompts.
-`SensorsPlugin.java` reads light, pressure, ambient temperature and humidity from `SensorManager`
-and sends `reading` events; `sensors/native.ts` turns them into channels with the shared kinds, so
-the default mapping applies (light → brightness, falling pressure → tension, humidity → space).
+`SensorsPlugin.java` lists every sensor the phone has: the standard environment sensors,
+proximity, the magnetic field, steps (asking for activity recognition), significant motion and a
+foldable's hinge, plus up to 12 vendor sensors (types from 65536, non-wake-up; a hall sensor
+counts as a cover). Motion and orientation are left to the browser. Once a second it adds battery
+temperature, voltage, current, power and charging, thermal headroom, Wi-Fi RSSI, screen
+brightness and media volume. `describe()` returns the channels with their kinds, units and
+ranges; readings go to the page as one `readings` event every 50 ms with the latest value of each
+channel that changed. `sensors/native.ts` announces whatever `describe()` returns, so the default
+mapping applies by kind.
 `MainActivity` keeps the screen on. CI (`.github/workflows/android.yml`) builds the APK, signed
 with a committed test key so updates install over each other, and publishes it as the
 `android-latest` pre-release.
+
+### Mac app (`apps/mac`)
+
+A small Swift app (AppKit and WKWebView) built with `swiftc` by `build.sh`, no Xcode project.
+`WebServer` serves the native web build from the bundle on `127.0.0.1:47123` (falling back to any
+free port): loopback http is a secure context, so camera and microphone work, and the fixed port
+keeps the page's local storage between launches. `Bridge` is the `sensinth` message handler: the
+page asks it to describe, start and stop, and it answers through `window.sensinthNative.receive`,
+batching readings every 50 ms like the Android plugin. Readers (`Readers.swift`): the lid angle
+(IOHID feature report, 30/s), ambient light and chip temperatures (the private
+`IOHIDEventSystemClient`, loaded with `dlsym`), the `AppleSmartBattery` service, thermal state,
+host CPU ticks, `kern.memorystatus_level`, idle time from Core Graphics, interface byte counters,
+CoreWLAN and CoreBluetooth. Motion: `MotionHelper` listens on a Unix socket and runs the bundled
+`sensinth-motion` with `do shell script … with administrator privileges`; the helper powers up
+the `AppleSPUHIDDriver` sensors, reads the accelerometer and gyroscope reports of
+`AppleSPUHIDDevice` and writes lines to the socket until it closes. On the page,
+`sensors/mac.ts` adds the "Mac sensors (app)" and "Mac motion" sources. CI
+(`.github/workflows/mac.yml`) builds a universal, ad-hoc signed app on a macOS runner and
+publishes it as the `mac-latest` pre-release.

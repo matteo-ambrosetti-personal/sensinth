@@ -5,11 +5,11 @@ everything else: which instruments play, every track's pattern, how the tracks m
 other, the key and the mode. No sensor, no music. The engine keeps the result in key, on the beat
 and structured in phrases, so it stays listenable whatever the sensors do.
 
-It runs on an Android phone (as an app or in Chrome) and on a Mac (as an installable web app). The
+It runs on an Android phone (as an app or in Chrome) and on a Mac (as an app or in the browser). The
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.6. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+**Status:** Phase 3.8. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
 Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
 **Free** has no style at all: the sensors also pick the instruments, from every style. It plays
 like a Digitakt driven by your surroundings: tracks with their own lengths, trig
@@ -20,10 +20,12 @@ waveform, steps and parameters (with Mute), the **Modulation** panel every live 
 jazz leave the key the way they should (12-bar forms, ii–V–I, tritone subs, blue notes), and
 **triggered effects** answer what happens around you: a shake stutters the mix, a clap washes it
 into reverb, closing a Mac's lid stops the tape, and an FX lane throws in risers, dives, dub
-throws and gate chops. Sources:
-your phone's motion, tilt, compass, microphone, camera, location, clock and battery, and in the
-Android app its light, pressure, temperature and humidity sensors; on a laptop, the trackpad and
-keyboard. The **Flow** page draws the whole path live: each sensor's raw and processed signal,
+throws and gate chops. Sources: your phone's motion, tilt, compass, microphone, camera, location,
+clock and battery; in the Android app every sensor the phone has plus its battery, heat, Wi-Fi,
+brightness and volume; in the Mac app the lid angle, light, chip and battery temperatures, power,
+CPU, memory, Wi-Fi, Bluetooth and idle time, and (with your password) the accelerometer and
+gyroscope; on any computer the trackpad (including Force Touch pressure), keyboard, game
+controllers and MIDI controllers, and in Chrome the MacBook lid and CPU pressure. The **Flow** page draws the whole path live: each sensor's raw and processed signal,
 the routes it takes to the tracks, and how the tracks are mixed and sent through the effects to
 the speakers; tap a sensor to light up everything it moves. The **Sensor lab** shows one sensor at
 a time, raw and processed. See
@@ -39,10 +41,45 @@ release on your phone, open it, and allow your browser to install unknown apps w
 Every push to `main` builds a new APK there; it installs over the previous one and keeps your
 settings. The app is signed with a test key, for testing only.
 
-The app reads everything the web version does plus the sensors browsers hide (light, air pressure,
-and temperature and humidity on phones that have them). It keeps the screen on while open.
+The app reads everything the web version does plus everything browsers hide. **Phone sensors
+(app)** lists what your phone has and turns each into a channel. On a Galaxy S23 that is:
 
-### Mac (and any computer)
+- light, air pressure, proximity (cover the top of the screen: accents and a filter dive), the
+  magnetic field, steps per minute (Android asks for _Physical activity_ the first time) and
+  "started moving";
+- Samsung's own sensors, by the names the phone gives them (the hall sensor of a flip cover counts
+  as a cover: closing it fills and brakes the tape);
+- battery temperature, voltage, current and power draw, charging, thermal headroom, Wi-Fi signal,
+  screen brightness and media volume.
+
+There is no temperature or humidity sensor in the S23 (phones that have them get those too).
+Motion, rotation and orientation come from the **Motion** source. The app keeps the screen on
+while open.
+
+### Mac app
+
+Download **Sensinth-mac.zip** from the
+[Sensinth for Mac (latest)](https://github.com/matteo-ambrosetti-personal/sensinth/releases/tag/mac-latest)
+release, unzip it and move **Sensinth.app** to Applications. It is not notarized, so the first
+time macOS refuses to open it: open _System Settings → Privacy & Security_, scroll down and click
+_Open Anyway_ (or run `xattr -dr com.apple.quarantine /Applications/Sensinth.app`). Allow the
+camera, microphone and Bluetooth when asked, if you want those sources.
+
+**Mac sensors (app)** is on from the start and reads, where your Mac has them:
+
+- the **lid angle** (16-inch MacBook Pro from 2019, M2 and later MacBook Air, 14/16-inch Pro):
+  opening sets the space, moving it adds variation, closing it fast stops the tape;
+- ambient light, chip temperature, battery level, temperature and power draw, charging;
+- thermal state, CPU load, memory in use, idle time (sitting still calms the music), network
+  traffic;
+- Wi-Fi signal and noise, and how many Bluetooth devices are nearby.
+
+**Mac motion** reads the accelerometer and gyroscope of Apple Silicon MacBooks (shake, rotation,
+tilt). Only an administrator can read them, so macOS asks for your password and runs a small
+helper inside the app until you turn it off or quit. It is experimental: if it says the Mac has no
+motion sensor it can read, the rest still works.
+
+### Mac (and any computer) in the browser
 
 Open the hosted app (GitHub Pages, below) in Chrome or Safari and install it:
 
@@ -52,8 +89,15 @@ Open the hosted app (GitHub Pages, below) in Chrome or Safari and install it:
 
 It then opens in its own window from the Dock and works offline. On a laptop the **Pointer & keys**
 source is on by default: moving the pointer (or scrolling) raises the energy, its height sets the
-melody's register, left–right the timbre, and typing adds accents. The microphone, camera and
-location work too.
+melody's register, left–right the timbre, and typing adds accents; a Force Touch press (Safari) or
+a pen's pressure accents too. The microphone, camera and location work too, and:
+
+- **MacBook lid** (Chrome or Edge): pick the lid sensor once when asked; it reconnects after that.
+- **CPU pressure** (Chrome or Edge): a busy computer makes busier music.
+- **Game controllers**: every stick and trigger is a channel; buttons add accents and stutters.
+  Press a button so the browser sees the controller.
+- **MIDI controllers**: each knob, fader or pitch bend becomes a channel the first time you move it
+  and drives its own dial; keys add accents and dub throws.
 
 ### Hosted web app
 
@@ -166,6 +210,8 @@ packages/core    Music brain: signal processing, sensor hub, mapping, music theo
 packages/audio   Web Audio renderer: lookahead scheduler, instruments, effects, offline render.
 apps/web         The app (Vite + PWA): UI, sensor adapters, Sensor lab.
 apps/web/android The Android app (Capacitor), with a native plugin for hidden sensors.
+apps/mac         The Mac app (Swift): the web app in a window, native sensor readers and the
+                 motion helper. build.sh builds it on macOS.
 docs/            Architecture, roadmap, sensor protocol.
 ```
 

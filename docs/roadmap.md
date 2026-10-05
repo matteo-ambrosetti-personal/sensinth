@@ -106,12 +106,21 @@ route's strength, brightness and moving dots what passes now, dashes a route tha
 Hovering or tapping a sensor or track lights its whole path; on a phone the cards stack and the
 picked sensor's links run down the side.
 
-## Next: every sensor
+## Phase 3.8: every sensor (done, pending a test on real hardware)
 
-**Every sensor** on a Mac (a native app reading the lid angle, ambient light, battery,
-temperatures and more; the accelerometer and gyroscope as an opt-in) and on Android phones (every
-hardware sensor, battery, thermal and Wi-Fi signals), plus game controllers, MIDI controllers and
-trackpad pressure in the browser.
+- **Android app:** every sensor the phone has (on a Galaxy S23: light, pressure, proximity,
+  magnetic field, steps, significant motion, Samsung's own sensors including the hall sensor),
+  plus battery temperature, voltage, current and power, charging, thermal headroom, Wi-Fi signal,
+  screen brightness and media volume, batched to the page every 50 ms.
+- **Mac app** (`apps/mac`, released as _Sensinth for Mac (latest)_): the lid angle, ambient
+  light, chip and battery temperatures, power, thermal state, CPU, memory, idle time, network,
+  Wi-Fi and Bluetooth, and, with the admin password, the accelerometer and gyroscope.
+- **Browser:** the MacBook lid over WebHID, CPU pressure, game controllers, MIDI controllers and
+  press force.
+- About 25 new sensor kinds with default dials, triggers and effects.
+
+The native readers are built and tested in CI with fake bridges; the real sensors need a try on a
+Mac and an S23. Fan speed (it needs the SMC) is not read.
 
 ## Phase 4: Pico sensor node
 
