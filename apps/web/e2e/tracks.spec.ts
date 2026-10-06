@@ -14,8 +14,9 @@ async function level(track: Locator): Promise<number> {
   return Number(await track.locator('.track-scope').getAttribute('data-level'));
 }
 
-async function startWithSimulatedSensors(page: Page): Promise<void> {
+async function startWithSimulatedSensors(page: Page, style?: string): Promise<void> {
   await page.goto('/');
+  if (style) await page.locator('.style-chip', { hasText: style }).click();
   await page.locator('label[for="src-sim"]').first().click();
   await expect(page.locator('#src-sim')).toBeChecked();
   await page.locator('#play').click();
@@ -23,7 +24,8 @@ async function startWithSimulatedSensors(page: Page): Promise<void> {
 }
 
 test('each track shows its own scope, step grid, params and mute', async ({ page }) => {
-  await startWithSimulatedSensors(page);
+  // Chiptune always has 5–7 tracks; Free, the default, may have as few as 3.
+  await startWithSimulatedSensors(page, 'Chiptune');
   const rows = page.locator('#tracks .track:not(.is-fx)');
   await expect(rows.first()).toBeVisible({ timeout: 8000 });
   expect(await rows.count()).toBeGreaterThanOrEqual(4);
