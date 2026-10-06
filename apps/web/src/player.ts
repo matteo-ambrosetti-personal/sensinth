@@ -9,12 +9,13 @@ import {
   type NoteEvent,
   type Style,
 } from '@sensinth/core';
+import { BackgroundPlayback } from './playback';
 import { nowSeconds } from './sensors/source';
 import { ScreenWakeLock } from './wakeLock';
 
 /** What deterministic mode is set to: the seed, the loop and how inputs act. */
 export type SongSettings = Required<
-  Pick<DeterministicOptions, 'seed' | 'loopBars' | 'repeat' | 'sensors'>
+  Pick<DeterministicOptions, 'seed' | 'loopBars' | 'repeat' | 'sensors' | 'instruments' | 'mapping'>
 >;
 
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
@@ -40,6 +41,8 @@ export class Player {
   private renderer: Renderer | undefined;
   private scheduler: LookaheadScheduler | undefined;
   private readonly wakeLock = new ScreenWakeLock();
+  /** In the Android app, keeps the music going with the screen off. */
+  readonly background = new BackgroundPlayback();
   private style: Style;
   private bpm: number;
   private scope: AnalyserNode | undefined;
@@ -130,6 +133,28 @@ export class Player {
   /** Must be called from a user gesture (browsers block audio otherwise). */
   async start(): Promise<void> {
     if (this.playing) return;
+    await this.begin();
+    void this.wakeLock.enable();
+    this.background.enable();
+  }
+
+  /**
+   * Starts over: a new piece from its first step, or, in deterministic mode,
+   * the seed's own song with every change undone. Also from a user gesture.
+   */
+  async restart(): Promise<void> {
+    if (!this.playing) return this.start();
+    this.halt();
+    await this.begin();
+  }
+
+  stop(): void {
+    this.halt();
+    void this.wakeLock.disable();
+    this.background.disable();
+  }
+
+  private async begin(): Promise<void> {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     await ctx.resume();
     this.ctx = ctx;
@@ -154,7 +179,8 @@ export class Player {
     let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
     scheduler.onStep = (_step, time, stepSeconds) => {
-      this.hub.markStale(nowSeconds());
+      // Away from the screen the system may pause some sensors: they hold their last reading.
+      if (document.visibilityState !== 'hidden') this.hub.markStale(nowSeconds());
       const events = this.engine.tick(stepSeconds);
       // The engine changes style on a bar line; follow it there.
       if (this.engine.currentStyle !== this.style) {
@@ -183,10 +209,10 @@ export class Player {
     };
     this.scheduler = scheduler;
     scheduler.start(this.bpm, START_DELAY);
-    void this.wakeLock.enable();
   }
 
-  stop(): void {
+  /** Stops the sound and the clock, keeping the screen and background locks. */
+  private halt(): void {
     this.scheduler?.stop();
     this.scheduler = undefined;
     // A deterministic engine keeps a log of the sensors: let it go.
@@ -201,7 +227,6 @@ export class Player {
     const ctx = this.ctx;
     this.ctx = undefined;
     if (ctx) setTimeout(() => void ctx.close(), 400);
-    void this.wakeLock.disable();
   }
 
   /** Lets one channel drive the music alone (the Sensor lab's solo switch). */

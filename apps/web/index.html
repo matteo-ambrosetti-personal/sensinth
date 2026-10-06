@@ -37,6 +37,18 @@
           </svg>
           <span class="play-label">Play</span>
         </button>
+        <button
+          id="restart"
+          class="restart"
+          type="button"
+          aria-label="Start over"
+          title="Start over"
+          disabled
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 6V2L7 7l5 5V8a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z" />
+          </svg>
+        </button>
         <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
         <dl class="genome" aria-label="What the sensors chose">
           <div>
@@ -279,8 +291,28 @@
                   <option value="steps">Steps</option>
                 </select>
               </label>
+              <label class="seed-field">
+                Instruments
+                <select id="det-instruments">
+                  <option value="free">Can change</option>
+                  <option value="fixed">Stay the seed’s</option>
+                </select>
+              </label>
             </div>
             <p id="det-desc" class="style-desc"></p>
+            <details id="det-map" class="det-map">
+              <summary>
+                What each input does <span id="det-map-count" class="h2-note"></span>
+              </summary>
+              <p class="det-map-note">
+                Give any key or sensor another effect, or none, and choose how it repeats. Rows left
+                on (default) follow the settings above.
+              </p>
+              <div id="det-map-rows" class="map-rows"></div>
+              <button id="det-map-reset" class="pill-btn" type="button">
+                Back to the defaults
+              </button>
+            </details>
           </section>
 
           <section id="song-panel" class="panel play-only" aria-labelledby="song-title" hidden>
@@ -290,10 +322,6 @@
             <p id="changes-empty" class="empty">
               No changes: the song loops as it is. Press a key or move a sensor.
             </p>
-            <details class="keymap">
-              <summary>What each key does</summary>
-              <table id="keymap" class="keymap-table"></table>
-            </details>
           </section>
 
           <section class="panel" aria-labelledby="dials-title">

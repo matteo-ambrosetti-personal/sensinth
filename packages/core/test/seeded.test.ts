@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   Engine,
+  INPUT_ROWS,
+  INSTRUMENT_EFFECTS,
+  InputMapper,
   KEY_EFFECTS,
   LOOP_BARS,
   ReplaySource,
@@ -356,6 +359,93 @@ describe('Deterministic songs', () => {
     const b = replayed();
     expect(a.versions[7]).not.toBe('base');
     expect(b.events).toEqual(a.events);
+  });
+
+  it('keep the seed’s instruments when they may not change', () => {
+    const o = { seed: 42, loopBars: 4 };
+    const presses = [key('Backspace', midBar(lofi, 0)), key('Enter', midBar(lofi, 0))];
+    const free = take(lofi, 4, o, { presses });
+    const fixed = take(lofi, 4, { ...o, instruments: false }, { presses });
+    const machines = (t: { engine: Engine }) =>
+      t.engine.trackMachines().map((m) => `${m.slot}:${m.machine}`);
+    const base = take(lofi, 4, o);
+    expect(machines(free)).not.toEqual(machines(base));
+    expect(machines(fixed)).toEqual(machines(base));
+    expect(fixed.versions.every((v) => v === 'base')).toBe(true);
+    // Keys without an effect of their own never pick one that changes instruments.
+    const mapper = new InputMapper({ instruments: false });
+    for (let v = 1000; v < 2000; v++) {
+      const e = mapper.press({ id: KEYS.id, t: 0, kind: 'key', value: v, velocity: 1 }, KEYS.kind);
+      expect(e && INSTRUMENT_EFFECTS.has(e.effect.id)).toBeFalsy();
+    }
+  });
+
+  it('give inputs the effects you choose, and their own repeat', () => {
+    const o = { seed: 42, loopBars: 4 };
+    // O off: nothing happens.
+    const off = take(
+      chiptune,
+      4,
+      { ...o, mapping: { 'key:KeyO': { effect: 'none' } } },
+      {
+        presses: [key('KeyO', midBar(chiptune, 0))],
+      },
+    );
+    expect(off.versions.every((v) => v === 'base')).toBe(true);
+    // The number row rotates instead of muting: 2 now does what S does.
+    const rotate = { 'keys:mute': { effect: { id: 'rotate', dir: 1 } } } as const;
+    const two = take(
+      chiptune,
+      4,
+      { ...o, mapping: rotate },
+      {
+        presses: [key('Digit2', midBar(chiptune, 0))],
+      },
+    );
+    const s = take(chiptune, 4, o, { presses: [key('KeyS', midBar(chiptune, 0))] });
+    expect(two.engine.view().song?.edits[0]?.effect).toEqual({ id: 'rotate', target: 2, dir: 1 });
+    expect(bars(two.events, 2, 4)).toEqual(bars(s.events, 2, 4));
+    // O adds up while every other key toggles.
+    const twice = [key('KeyO', midBar(chiptune, 0)), key('KeyO', midBar(chiptune, 1))];
+    const toggled = take(chiptune, 4, o, { presses: twice });
+    const added = take(
+      chiptune,
+      4,
+      { ...o, mapping: { 'key:KeyO': { repeat: 'accumulate' } } },
+      {
+        presses: twice,
+      },
+    );
+    expect(toggled.versions[3]).toBe('base');
+    expect(added.engine.view().song?.edits[0]?.count).toBe(2);
+    expect(added.keys[3]).toBe(((added.keys[0] as number) + 14) % 12);
+  });
+
+  it('let one sensor act in steps while the others act by zone', () => {
+    const dt = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    const tilt = (t: number): SensorSample[] => {
+      const bar = t / dt;
+      return [{ id: TILT.id, t, v: bar >= 2 && bar < 4 ? 60 : 0 }];
+    };
+    const o = {
+      seed: 42,
+      loopBars: 4,
+      sensors: 'zones',
+      mapping: { 'sensor:orientation.pitch': { sensors: 'steps', repeat: 'accumulate' } },
+    } as const;
+    const t = take(chiptune, 8, o, { descriptors: [TILT], sampleAt: tilt });
+    expect(t.engine.view().song?.edits[0]?.count).toBe(4);
+    expect(t.engine.view().song?.edits[0]?.zone).toBeUndefined();
+  });
+
+  it('lists every input once, with keys acting on tracks grouped', () => {
+    const ids = INPUT_ROWS.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const rotate = INPUT_ROWS.find((r) => r.id === 'keys:rotate');
+    expect(rotate?.name).toBe('A–K');
+    expect(rotate?.perTrack).toHaveLength(8);
+    expect(INPUT_ROWS.find((r) => r.id === 'key:KeyO')?.effect).toEqual({ id: 'fifth' });
+    expect(INPUT_ROWS.find((r) => r.id === 'sensor:orientation.pitch')?.continuous).toBe(true);
   });
 
   it('offers the loop lengths and keeps zones steady near an edge', () => {

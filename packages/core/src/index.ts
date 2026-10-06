@@ -25,6 +25,7 @@ export * from './seeded/inputs';
 export * from './seeded/edits';
 export * from './seeded/effects';
 export * from './seeded/song';
+export * from './seeded/mapping';
 export * from './sensors/hub';
 export * from './sensors/kinds';
 export * from './sensors/recording';

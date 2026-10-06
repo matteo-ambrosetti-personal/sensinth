@@ -105,16 +105,83 @@ test('loops with no sensor; a key changes the song, and toggles back', async ({ 
   await expect(change).toHaveCount(0);
 });
 
-test('lists what every key does', async ({ page }) => {
+test('lets you choose what each input does, and how it repeats', async ({ page }) => {
   await page.goto('/');
+  await allSourcesOff(page);
+  await page.locator('label[for="src-keyboard"]').first().click();
+  await expect(page.locator('#det-map')).toBeHidden();
   await useSeed(page, 42);
+  await page.locator('#det-loop').selectOption('2');
+  await page.locator('#det-map summary').click();
+  const row = (id: string) => page.locator(`.map-row[data-row="${id}"]`);
+  await expect(row('keys:rotate').locator('.map-name')).toHaveText('A–K');
+  await expect(row('keys:rotate').locator('.map-effect option').first()).toHaveText(
+    'Rotate track n right (default)',
+  );
+  await expect(row('key:KeyO').locator('.map-effect option').first()).toHaveText(
+    'Key up a fifth (default)',
+  );
+  await expect(row('sensor:orientation.pitch').locator('.map-again option').first()).toHaveText(
+    'By zone (default)',
+  );
+
+  // O fills the drums instead, and adds up while other keys toggle.
+  await row('key:KeyO').locator('.map-effect').selectOption({ label: 'Fill' });
+  await expect(row('key:KeyO').locator('.map-target')).toBeVisible();
+  await row('key:KeyO').locator('.map-target').selectOption({ label: 'on the drums' });
+  await row('key:KeyO').locator('.map-again').selectOption('accumulate');
+  // L does nothing.
+  await row('key:KeyL').locator('.map-effect').selectOption('none');
+  await expect(row('key:KeyO')).toHaveClass(/is-changed/);
+  await expect(page.locator('#det-map-count')).toHaveText('2 changed');
+  await expect(page.locator('#det-desc')).toContainText('2 inputs do what you chose');
+
+  await page.reload();
+  await page.locator('#det-map summary').click();
+  await expect(row('key:KeyO').locator('.map-effect')).toHaveValue('fill');
+  await expect(row('key:KeyO').locator('.map-target')).toHaveValue('drums');
+  await expect(row('key:KeyO').locator('.map-again')).toHaveValue('accumulate');
+
   await page.locator('#play').click();
-  await page.locator('.keymap summary').click();
-  const table = page.locator('#keymap');
-  await expect(table).toContainText('Rotate track n right');
-  await expect(table).toContainText('A–K');
-  await expect(table).toContainText('Key up a fifth');
-  await expect(table).toContainText('Other keys');
+  await page.locator('h1').first().click();
+  await page.keyboard.press('KeyL');
+  await page.keyboard.press('KeyO');
+  await page.keyboard.press('KeyO');
+  const change = page.locator('#changes .change');
+  await expect(change).toHaveCount(1, { timeout: 4000 });
+  await expect(change).toContainText('Fill the drums');
+  await expect(change).toContainText('×2');
+  await page.locator('#play').click();
+
+  await page.locator('#det-map-reset').click();
+  await expect(page.locator('.map-row.is-changed')).toHaveCount(0);
+  await expect(page.locator('#det-map-count')).toHaveText('');
+});
+
+test('keeps the seed’s instruments when asked', async ({ page }) => {
+  await page.goto('/');
+  await allSourcesOff(page);
+  await page.locator('label[for="src-keyboard"]').first().click();
+  await useSeed(page, 42);
+  await page.locator('#det-loop').selectOption('2');
+  await page.locator('#det-instruments').selectOption('fixed');
+  await expect(page.locator('#det-desc')).toContainText('The instruments stay the seed’s.');
+  await page.locator('#det-map summary').click();
+  const swap = page
+    .locator('.map-row[data-row="key:Backspace"] .map-effect option')
+    .filter({ hasText: 'Swap instruments' });
+  await expect(swap).toBeDisabled();
+  await page.locator('#play').click();
+  const tracks = await page.locator('#tracks .track:not(.is-fx) .track-name').allTextContents();
+  await page.locator('h1').first().click();
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('KeyO');
+  await expect(page.locator('#changes .change')).toHaveCount(1, { timeout: 4000 });
+  await expect(page.locator('#changes .change')).toContainText('Key O');
+  expect(await page.locator('#tracks .track:not(.is-fx) .track-name').allTextContents()).toEqual(
+    tracks,
+  );
 });
 
 test('a recording replays its key presses from Play, the same every time', async ({ page }) => {

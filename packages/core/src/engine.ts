@@ -26,8 +26,9 @@ import {
   type RepeatMode,
   type SensorMode,
 } from './seeded/edits';
-import { KEY_CODES, LEVELS, keyName, pressEffect, sensorEffect } from './seeded/effects';
+import { KEY_CODES, LEVELS, keyName } from './seeded/effects';
 import { InputModel } from './seeded/inputs';
+import { InputMapper, type InputMap } from './seeded/mapping';
 import { DEFAULT_LOOP_BARS, baseSong, buildSong, type Song, type SongSpec } from './seeded/song';
 import { Realizer, type HarmonyContext } from './seq/realize';
 import { TrackRunner, type FiredTrig } from './seq/runner';
@@ -70,6 +71,10 @@ export interface DeterministicOptions {
   repeat?: RepeatMode;
   /** How continuous sensors act (default `zones`). */
   sensors?: SensorMode;
+  /** False keeps the seed's instruments: no input swaps or adds one (default true). */
+  instruments?: boolean;
+  /** Your own effect and repeat for any input (see `INPUT_ROWS`). */
+  mapping?: InputMap;
 }
 
 /** The song deterministic mode is playing. */
@@ -156,6 +161,7 @@ interface Seeded {
   delay: number;
   loopBars: number;
   model: InputModel;
+  mapper: InputMapper;
   tracker: EditTracker;
   /** Musical seconds at the start of the next step. */
   clock: number;
@@ -272,6 +278,10 @@ export class Engine {
         delay: d.inputDelay ?? DEFAULT_INPUT_DELAY,
         loopBars,
         model: new InputModel(this.hub, { origin }),
+        mapper: new InputMapper({
+          ...(d.mapping ? { mapping: d.mapping } : {}),
+          ...(d.instruments !== undefined ? { instruments: d.instruments } : {}),
+        }),
         tracker: new EditTracker({ repeat: d.repeat ?? 'toggle', sensors: d.sensors ?? 'zones' }),
         clock: 0,
         readT: -Infinity,
@@ -480,13 +490,14 @@ export class Engine {
   private readInputs(det: Seeded, t: number): void {
     for (const e of det.model.presses(det.readT, t)) {
       const desc = det.model.describe(e.id);
-      if (!desc) continue;
-      det.tracker.press(pressInput(e), pressSource(e, desc.label), pressEffect(e, desc.kind));
+      const mapped = desc && det.mapper.press(e, desc.kind);
+      if (!desc || !mapped) continue;
+      det.tracker.press(pressInput(e), pressSource(e, desc.label), mapped.effect, mapped.repeat);
     }
     for (const r of det.model.readings(t)) {
       const desc = det.model.describe(r.id);
-      const map = desc && sensorEffect(desc, r.timescale);
-      if (map) det.tracker.reading(r.id, r.label, r.x, map);
+      const mapped = desc && det.mapper.sensor(desc, r.timescale);
+      if (mapped) det.tracker.reading(r.id, r.label, r.x, mapped.map, mapped);
     }
     det.readT = t;
   }

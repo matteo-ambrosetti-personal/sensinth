@@ -38,7 +38,8 @@ import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
 import { FlowView } from './ui/flow/flow';
 import { LabView, SOURCE_NAMES } from './ui/lab';
-import { ChangesView, renderKeyMap } from './ui/changes';
+import { ChangesView } from './ui/changes';
+import { InputMapEditor } from './ui/inputMap';
 import { MatrixView } from './ui/matrix';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
@@ -114,11 +115,13 @@ function renderStyles(): void {
   styleDesc.textContent = `${style.description} Suggested tempo: ${style.defaultTempo} BPM.`;
 }
 
+/** A new style brings its suggested tempo; the slider and Tap still change it after. */
 function selectStyle(s: Style): void {
   style = s;
   player.setStyle(s);
   prefs.styleId = s.id;
   savePrefs(prefs);
+  setBpm(s.defaultTempo);
   renderStyles();
 }
 renderStyles();
@@ -240,6 +243,7 @@ function download(name: string, text: string): void {
 
 // Transport -----------------------------------------------------------------
 const playBtn = $<HTMLButtonElement>('play');
+const restartBtn = $<HTMLButtonElement>('restart');
 const hint = $('hint');
 
 /** No sensor, no music: Play needs at least one source switched on (deterministic mode aside). */
@@ -254,6 +258,7 @@ function renderTransport(): void {
   playBtn.setAttribute('aria-pressed', String(playing));
   playBtn.setAttribute('aria-label', playing ? 'Stop' : 'Play');
   playBtn.disabled = !canPlay;
+  restartBtn.disabled = !playing;
   const channels = player.hub.list();
   const playingSeed = player.view()?.snapshot.seed;
   const tilt =
@@ -293,6 +298,24 @@ playBtn.addEventListener('click', async (event) => {
   }
   renderTransport();
 });
+
+// Start over: a new piece from the top, or the seed's own song again.
+restartBtn.addEventListener('click', async (event) => {
+  if (event.detail > 0) restartBtn.blur();
+  if (!player.playing) return;
+  try {
+    await player.restart();
+  } catch (err) {
+    hint.textContent = `Audio could not start: ${(err as Error).message}`;
+  }
+  renderTransport();
+});
+
+// Stop in the Android app's notification stops the music here too.
+player.background.onStopRequested = () => {
+  if (player.playing) player.stop();
+  renderTransport();
+};
 renderTransport();
 
 // Deterministic mode ---------------------------------------------------------
@@ -301,7 +324,11 @@ const detSeed = $<HTMLInputElement>('det-seed');
 const detLoop = $<HTMLSelectElement>('det-loop');
 const detRepeat = $<HTMLSelectElement>('det-repeat');
 const detSensors = $<HTMLSelectElement>('det-sensors');
+const detInstruments = $<HTMLSelectElement>('det-instruments');
 const detDesc = $('det-desc');
+const detMap = $<HTMLDetailsElement>('det-map');
+const detMapCount = $('det-map-count');
+const inputMap = new InputMapEditor($('det-map-rows'), $<HTMLButtonElement>('det-map-reset'));
 detOn.checked = prefs.deterministic ?? false;
 detSeed.value = String(prefs.seed ?? 42);
 detLoop.value = String(
@@ -313,6 +340,7 @@ detRepeat.value = REPEAT_MODES.includes(prefs.repeat as RepeatMode)
 detSensors.value = SENSOR_MODES.includes(prefs.sensors as SensorMode)
   ? (prefs.sensors as string)
   : 'zones';
+detInstruments.value = prefs.instruments === false ? 'fixed' : 'free';
 
 function readSeed(): number {
   const v = Math.floor(Number(detSeed.value));
@@ -329,25 +357,53 @@ const SENSOR_TEXT: Record<SensorMode, string> = {
   steps: 'Sensors act in steps: each zone crossed counts as a press.',
 };
 
-function applyDeterministic(): void {
+/** Applies the settings; `remap` redraws the input map (its defaults changed). */
+function applyDeterministic(remap = true): void {
   const seed = readSeed();
   const loopBars = Number(detLoop.value);
   const repeat = detRepeat.value as RepeatMode;
   const sensors = detSensors.value as SensorMode;
+  const instruments = detInstruments.value !== 'fixed';
+  if (remap) inputMap.set(prefs.inputMap ?? {}, { repeat, sensors, instruments });
+  const mapping = inputMap.map;
   detSeed.value = String(seed);
-  player.setDeterministic(detOn.checked ? { seed, loopBars, repeat, sensors } : undefined);
-  for (const el of [detSeed, detLoop, detRepeat, detSensors]) el.disabled = !detOn.checked;
-  Object.assign(prefs, { deterministic: detOn.checked, seed, loopBars, repeat, sensors });
+  player.setDeterministic(
+    detOn.checked ? { seed, loopBars, repeat, sensors, instruments, mapping } : undefined,
+  );
+  for (const el of [detSeed, detLoop, detRepeat, detSensors, detInstruments]) {
+    el.disabled = !detOn.checked;
+  }
+  detMap.hidden = !detOn.checked;
+  const changed = inputMap.changed;
+  detMapCount.textContent = changed > 0 ? `${changed} changed` : '';
+  Object.assign(prefs, {
+    deterministic: detOn.checked,
+    seed,
+    loopBars,
+    repeat,
+    sensors,
+    instruments,
+    inputMap: mapping,
+  });
   savePrefs(prefs);
-  const later = player.playing ? ' Takes effect at the next Play.' : '';
+  const later = player.playing ? ' Takes effect when you start over or at the next Play.' : '';
+  const kept = instruments ? '' : ' The instruments stay the seed’s.';
+  const own =
+    changed > 0
+      ? ` ${changed === 1 ? 'One input does' : `${changed} inputs do`} what you chose.`
+      : '';
   detDesc.textContent = detOn.checked
-    ? `The seed writes a ${loopBars}-bar song that loops until something changes. Every key and sensor changes it its own way, the same way every time. ${REPEAT_TEXT[repeat]} ${SENSOR_TEXT[sensors]}${later}`
+    ? `The seed writes a ${loopBars}-bar song that loops until something changes. Every key and sensor changes it its own way, the same way every time. ${REPEAT_TEXT[repeat]} ${SENSOR_TEXT[sensors]}${kept}${own}${later}`
     : `Off: the sensors write everything, so the smallest change plays different music.${later}`;
   renderTransport();
 }
-for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors]) {
-  el.addEventListener('change', applyDeterministic);
+for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors, detInstruments]) {
+  el.addEventListener('change', () => applyDeterministic());
 }
+inputMap.onChange = (map) => {
+  prefs.inputMap = map;
+  applyDeterministic(false);
+};
 applyDeterministic();
 
 // A replay starts over at Play, so a recording always plays the same piece.
@@ -449,7 +505,6 @@ const changesView = new ChangesView(
   $('changes'),
   $('changes-empty'),
 );
-renderKeyMap($('keymap'));
 const genomeSectionLabel = $('g-section-label');
 const genomeHashLabel = $('g-hash-label');
 const genomeChangeLabel = $('g-change-label');

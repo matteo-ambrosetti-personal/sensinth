@@ -3,7 +3,7 @@ import { clamp, mod } from '../math';
 import { hashInts, hashString, Rng } from '../random';
 import { generateTrack, newTrigAt, writePattern } from '../seq/generate';
 import type { TrackRole, TrackSpec } from '../seq/types';
-import type { SensorDescriptor, SensorEvent, Timescale } from '../sensors/types';
+import type { SensorDescriptor, Timescale } from '../sensors/types';
 import type { Machine } from '../styles/schema';
 import { PRESS_KINDS } from './inputs';
 import type { SongSpec } from './song';
@@ -46,6 +46,8 @@ export interface Effect {
 /** Levels of swing, space and brightness the song moves between. */
 export const LEVELS = 5;
 const MAX_TRACKS = 8;
+/** Most tracks an effect can name. */
+export const MAX_TRACK_TARGET = MAX_TRACKS;
 /** Effects that stop the music; FX throws leave them out. */
 const NO_THROW = new Set(['tapeStop', 'brake']);
 
@@ -191,7 +193,7 @@ export function keyName(code: string): string {
 }
 
 /** Onsets of fast sensors, by kind: a shake rewrites the drums, a clap fills them… */
-const ONSET_EFFECTS: Readonly<Record<string, Effect>> = {
+export const ONSET_EFFECTS: Readonly<Record<string, Effect>> = {
   'motion.accel': { id: 'rewrite', target: 'drums' },
   'sound.level': { id: 'fill', target: 'drums' },
   'camera.motion': { id: 'rotate', target: 'all', dir: 1 },
@@ -203,27 +205,14 @@ const ONSET_EFFECTS: Readonly<Record<string, Effect>> = {
   'controller.trigger': { id: 'fxThrow' },
 };
 
-/** The effect of a press: a key, a MIDI key, a button, or an onset of a sensor of this kind. */
-export function pressEffect(event: SensorEvent, kind: string): Effect {
-  const n = PRESS_CATALOGUE.length;
-  switch (event.kind) {
-    case 'key':
-      return keyEffect(Math.round(event.value));
-    case 'note':
-    case 'button':
-      return PRESS_CATALOGUE[mod(Math.round(event.value), n)] as Effect;
-    case 'onset':
-      return ONSET_EFFECTS[kind] ?? (PRESS_CATALOGUE[hashString(kind) % n] as Effect);
-  }
-}
-
 /** How a continuous sensor acts: an effect, and whether its zones lean either way around the middle. */
 export interface SensorEffect {
   effect: Effect;
   centered: boolean;
 }
 
-const SENSOR_EFFECTS: Readonly<Record<string, SensorEffect>> = {
+/** Continuous sensors by kind; the others act by timescale (see `sensorEffect`). */
+export const SENSOR_EFFECTS: Readonly<Record<string, SensorEffect>> = {
   'orientation.pitch': { effect: { id: 'fifth' }, centered: true },
   'orientation.roll': { effect: { id: 'mode' }, centered: true },
   'pointer.y': { effect: { id: 'octave', target: 'melodic' }, centered: true },
@@ -318,6 +307,32 @@ export function effectLabel(e: Effect): string {
       return 'More space';
     case 'brightness':
       return 'Brighter';
+  }
+}
+
+/** What an effect does, without its target: "Rotate right", "Key up a fifth". */
+export function effectName(e: Effect): string {
+  switch (e.id) {
+    case 'mute':
+      return 'Mute';
+    case 'rewrite':
+      return 'Rewrite';
+    case 'rotate':
+      return e.dir === -1 ? 'Rotate left' : 'Rotate right';
+    case 'octave':
+      return 'Octave';
+    case 'thin':
+      return 'Thin';
+    case 'fill':
+      return 'Fill';
+    case 'reverse':
+      return 'Reverse';
+    case 'ratchet':
+      return 'Rolls';
+    case 'machine':
+      return 'Swap instruments';
+    default:
+      return effectLabel(e);
   }
 }
 

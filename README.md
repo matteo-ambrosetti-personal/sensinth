@@ -9,7 +9,7 @@ It runs on an Android phone (as an app or in Chrome) and on a Mac (as an app or 
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.10. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+**Status:** Phase 3.11. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
 Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
 **Free** has no style at all: the sensors also pick the instruments, from every style. It plays
 like a Digitakt driven by your surroundings: tracks with their own lengths, trig
@@ -30,8 +30,10 @@ the routes it takes to the tracks, and how the tracks are mixed and sent through
 the speakers; tap a sensor to light up everything it moves. The **Sensor lab** shows one sensor at
 a time, raw and processed. Switch on **Deterministic** and set a **seed** for the opposite
 promise: the seed writes a song that loops until you change something, and every key and sensor
-changes it its own way, the same way every time. See
-[docs/roadmap.md](docs/roadmap.md).
+changes it its own way, the same way every time; you can give any input another effect, decide
+how it repeats, and keep the seed's instruments. Picking a style sets its tempo, **Start over**
+(next to Play) begins again from the top, and the Android app keeps playing with the screen off.
+See [docs/roadmap.md](docs/roadmap.md).
 
 ## Get it
 
@@ -57,6 +59,13 @@ The app reads everything the web version does plus everything browsers hide. **P
 There is no temperature or humidity sensor in the S23 (phones that have them get those too).
 Motion, rotation and orientation come from the **Motion** source. The app keeps the screen on
 while open.
+
+**It keeps playing in the background.** While the music plays, turn the screen off or switch to
+another app: a _Sensinth is playing_ notification stays up, with **Stop**. The phone's sensors keep
+reading (and the microphone, if you allowed it); the camera pauses, and a sensor the system pauses
+holds its last reading. The first Play asks to show notifications (Android 13 and later); the
+music plays on either way. If a Samsung phone still stops it after a while, set the app's battery
+use to _Unrestricted_ (Settings → Apps → Sensinth → Battery).
 
 ### Mac app
 
@@ -143,7 +152,8 @@ Sensors → signal processing → ───────┼─► phrase mutation
 ### Deterministic mode: a song your inputs edit
 
 Switch on **Deterministic** in the Style panel and pick a **seed** (42 by default). It works with
-every style and takes effect at the next Play.
+every style and takes effect at the next Play, or when you press **Start over**, which also
+undoes every change.
 
 - **The seed writes a song that loops.** With no input changing, the same loop plays forever
   (choose 2, 4, 8, 12 or 16 bars). It plays with no sensor at all.
@@ -151,7 +161,7 @@ every style and takes effect at the next Play.
   mute tracks, `Q`–`I` rewrite them, `A`–`K` rotate them, `Z`–`,` move them up an octave; `O`
   moves the key up a fifth, `P` changes the mode, `L` the chords, `[` `]` half and double time,
   `\` takes the drums out, Space fills them, Enter adds a track (the full list is under **What
-  each key does** in the Song panel). MIDI keys and controller buttons pick from the same
+  each input does**, below the settings). MIDI keys and controller buttons pick from the same
   effects, and onsets of fast sensors have their own (a shake rewrites the drums, a clap fills
   them). Continuous sensors have one each too: tilt moves the key, roll the mode, light the
   brightness, the lid the number of tracks, the pointer the drums and the melody.
@@ -161,7 +171,14 @@ every style and takes effect at the next Play.
 - **You choose how inputs count.** _Same key again_: **toggles** (pressing again undoes it), **adds
   up** (every press applies it once more) or **counts once**. _Sensors_: **zones** (each sensor's
   range is split into five zones; coming back to a zone brings back its song) or **steps** (every
-  zone crossed counts as a press).
+  zone crossed counts as a press). _Instruments_: **can change** (Backspace swaps them, Enter adds
+  one) or **stay the seed's** (inputs that would change them do nothing).
+- **You choose what each input does.** **What each input does** lists every key (keys that act on
+  tracks 1–8 share a row), MIDI keys and controller buttons, sudden changes (a shake, a clap, a
+  closed cover…) and sensors (tilt, light, the lid…). Give any of them another effect, on the
+  tracks you pick, or none; and its own repeat (toggles, adds up, counts once) or, for a sensor,
+  zones or steps. Rows left on _(default)_ follow the settings above; **Back to the defaults**
+  clears your changes. Your map is saved on this device.
 - **The Song panel** lists every change in effect (which input, what it does, how many times),
   and the card under the scope shows the loop position and the song's version.
 
@@ -182,7 +199,8 @@ pnpm dev          # http://localhost:5173
 ```
 
 Press play. On a computer the pointer, keyboard and clock drive the music; on a phone, motion,
-tilt and the clock are on from the start. Turn on more sources (microphone, camera, location,
+tilt and the clock are on from the start. Picking a style sets its suggested tempo (change it after
+with the slider, − + or Tap); **Start over**, next to Stop, begins a new piece from the top. Turn on more sources (microphone, camera, location,
 simulated sensors) in the Sources panel; with every source off, Play waits for one.
 
 **Tracks** shows each track as it plays: its machine, length and speed, its own waveform, its

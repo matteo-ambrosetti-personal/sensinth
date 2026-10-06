@@ -24,6 +24,13 @@
 
         </activity>
 
+        <!-- Keeps the music playing with the screen off or another app in front. -->
+        <service
+            android:name=".PlaybackService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="mediaPlayback|microphone" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -47,6 +54,13 @@
     <!-- Step sensors (asked when the phone sensors start) and the Wi-Fi signal strength. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Playing in the background: a media notification (asked at the first Play), and the
+         processor kept awake with the screen off. The microphone keeps listening if allowed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />

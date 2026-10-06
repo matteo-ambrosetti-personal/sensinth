@@ -1,4 +1,4 @@
-import { KEY_EFFECTS, effectLabel, keyName, type EngineView } from '@sensinth/core';
+import { effectLabel, type EngineView } from '@sensinth/core';
 
 /**
  * Deterministic mode's song: where the loop is, its version, and every
@@ -52,38 +52,4 @@ export class ChangesView {
 
 function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n);
-}
-
-/**
- * Fills the "What each key does" table. Keys that do the same thing to
- * different tracks share a row: A–K rotate tracks 1–8, and so on.
- */
-export function renderKeyMap(table: HTMLElement): void {
-  const rows = new Map<string, string[]>();
-  for (const [code, effect] of Object.entries(KEY_EFFECTS)) {
-    const label = effectLabel(effect).replace(/\bT\d+\b/, 'track n');
-    rows.set(label, [...(rows.get(label) ?? []), keyName(code)]);
-  }
-  const body = document.createElement('tbody');
-  const row = (keys: string, what: string) => {
-    const tr = document.createElement('tr');
-    const th = document.createElement('th');
-    th.scope = 'row';
-    th.textContent = keys;
-    const td = document.createElement('td');
-    td.textContent = what;
-    tr.append(th, td);
-    body.append(tr);
-  };
-  for (const [label, keys] of rows) {
-    if (label.includes('track n')) {
-      const first = keys[0] as string;
-      const last = keys[keys.length - 1] as string;
-      row(`${first}–${last}`, `${label}: ${first} = track 1 … ${last} = track ${keys.length}`);
-    } else {
-      row(keys.join(' '), label);
-    }
-  }
-  row('Other keys', 'One of the effects above, always the same one');
-  table.replaceChildren(body);
 }

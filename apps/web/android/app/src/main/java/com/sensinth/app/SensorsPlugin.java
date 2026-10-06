@@ -118,6 +118,10 @@ public class SensorsPlugin extends Plugin implements SensorEventListener {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private boolean described = false;
     private boolean running = false;
+    /** True while listening to the hardware. */
+    private boolean registered = false;
+    /** True while the app is away (another app in front, or the screen off). */
+    private boolean paused = false;
 
     private Sensor stepDetector;
     private Sensor stepCounter;
@@ -199,12 +203,20 @@ public class SensorsPlugin extends Plugin implements SensorEventListener {
 
     @Override
     protected void handleOnPause() {
-        unregister();
+        paused = true;
+        // While the music plays on in the background, the sensors keep playing it.
+        if (!PlaybackService.isActive()) unregister();
     }
 
     @Override
     protected void handleOnResume() {
+        paused = false;
         if (running) register();
+    }
+
+    /** The music stopped: if the app is away, let the sensors rest until it comes back. */
+    void playbackStopped() {
+        if (paused) unregister();
     }
 
     @Override
@@ -311,6 +323,8 @@ public class SensorsPlugin extends Plugin implements SensorEventListener {
     }
 
     private void register() {
+        if (registered) return;
+        registered = true;
         if (manager != null) {
             for (Sensor s : readers.keySet()) manager.registerListener(this, s, SensorManager.SENSOR_DELAY_UI);
             if (stepDetector != null) manager.registerListener(this, stepDetector, SensorManager.SENSOR_DELAY_NORMAL);
@@ -324,6 +338,7 @@ public class SensorsPlugin extends Plugin implements SensorEventListener {
     }
 
     private void unregister() {
+        registered = false;
         if (manager != null) {
             manager.unregisterListener(this);
             if (significantMotion != null) manager.cancelTriggerSensor(motionTrigger, significantMotion);

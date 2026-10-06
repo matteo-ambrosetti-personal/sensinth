@@ -151,7 +151,8 @@ dozen steps: the smallest difference in a reading ends up audible.
 
 ## Deterministic mode (`core/src/seeded`)
 
-`new Engine({ style, deterministic: { seed, origin, loopBars, repeat, sensors } })` swaps the four
+`new Engine({ style, deterministic: { seed, origin, loopBars, repeat, sensors, instruments, mapping } })`
+swaps the four
 paths above for a song that loops while nothing changes, and that every input edits in its own
 fixed way.
 
@@ -173,6 +174,14 @@ fixed way.
   input within a phase, so the result never depends on the order of the presses.
   `KEY_EFFECTS` maps physical keys (`KeyboardEvent.code`) to effects; MIDI keys, buttons and
   unknown keys pick from the same list; onsets and continuous sensors have their own by kind.
+- **Your map** (`mapping.ts`). `INPUT_ROWS` lists every input you can map: single keys, keys
+  that act on tracks 1–8 (one row per effect, e.g. `keys:rotate` for A–K), other keys, MIDI keys,
+  buttons, onsets by kind and continuous sensors by kind (plus slow and other sensors).
+  `InputMapper` resolves an input to its effect: the default, or the row's `InputRule` (another
+  effect, `none`, a target; for track rows the key's own track), dropping effects that change
+  instruments (`machine`, `addTrack`) when `instruments` is false — inputs without an effect of
+  their own then pick from the catalogue without them. A rule can also carry its own `repeat`,
+  and for a sensor its own `sensors` mode, which `EditTracker` keeps per input.
 - **Counting.** `EditTracker` turns presses into counts by the repeat setting (toggle: presses mod
   2; accumulate: presses; once: at most 1) and readings into zones (five, with hysteresis 0.04):
   in zones mode the zone is the count (−2..2 for sensors that lean either way, 0..4 for
@@ -307,7 +316,8 @@ least one source switched on; while no channel is live the music waits and start
 after one sends. Because steps are scheduled 120 ms ahead, `Player` queues each step's engine view
 with its audio time and the UI shows the one that is sounding.
 
-- **Transport:** the scope of the mix, Play, and the genome card: section and phrase, the genome's
+- **Transport:** the scope of the mix, Play, **Start over** (`Player.restart`: a new engine and
+  audio clock without releasing the wake lock or the background service), and the genome card: section and phrase, the genome's
   short hash, where the key came from, and why the pattern was last rewritten (start, new
   section, new scene and the sensor that caused it).
 - **Tracks** (`ui/tracks.ts`): one row per track with its machine, length and speed, its own
@@ -327,7 +337,11 @@ with its audio time and the UI shows the one that is sounding.
   frame) what passes now, dashes a route that pulls down. Hover or tap lights a node's path; a
   phone stacks the columns and routes the picked sensor's links down the left gutter. The renderer
   exposes analysers on the reverb and delay returns and on the effects bus for its meters.
-- Tempo, style, the dials, the sources and each sensor's value, level, activity, onsets and routes.
+- Tempo, style (picking one sets its suggested tempo), the dials, the sources and each sensor's
+  value, level, activity, onsets and routes.
+- **Deterministic settings** (Style panel): seed, loop, repeat, sensors, instruments, and the
+  input map editor (`ui/inputMap.ts`), one row per `INPUT_ROWS` entry with menus for the effect,
+  its target and how it repeats; saved in prefs and applied at the next Play or Start over.
 
 ### Sensor sources (`apps/web/src/sensors`)
 
@@ -385,7 +399,17 @@ brightness and media volume. `describe()` returns the channels with their kinds,
 ranges; readings go to the page as one `readings` event every 50 ms with the latest value of each
 channel that changed. `sensors/native.ts` announces whatever `describe()` returns, so the default
 mapping applies by kind.
-`MainActivity` keeps the screen on. CI (`.github/workflows/android.yml`) builds the APK, signed
+`MainActivity` keeps the screen on.
+
+**Background play.** `PlaybackPlugin.java` (`playback.ts` on the web side) starts
+`PlaybackService` at Play and ends it at Stop. The service is a `mediaPlayback` foreground service
+(plus `microphone` when that permission is granted) with a silent notification and a Stop action,
+and holds a partial wake lock (at most six hours). Stop in the notification sends `stopRequested`
+to the page, which stops the music. While it runs, `SensorsPlugin` keeps its listeners through
+`onPause`, and when the activity stops `MainActivity` tells the WebView it is still visible
+(`dispatchWindowVisibilityChanged(VISIBLE)`), so Chromium keeps timers, Web Audio and the motion
+sensors at full pace; the renderer keeps `RENDERER_PRIORITY_IMPORTANT`. While the page is hidden,
+`Player` stops marking channels stale, so a sensor the system pauses holds its last reading. CI (`.github/workflows/android.yml`) builds the APK, signed
 with a committed test key so updates install over each other, and publishes it as the
 `android-latest` pre-release.
 

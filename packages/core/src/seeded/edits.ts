@@ -52,12 +52,16 @@ interface Pressed {
   source: string;
   effect: Effect;
   count: number;
+  /** This input's own repeat setting, if the input map gives one. */
+  repeat?: RepeatMode;
 }
 
 interface Zoned {
   source: string;
   map: SensorEffect;
   zone: number;
+  sensors: SensorMode;
+  repeat?: RepeatMode;
 }
 
 /**
@@ -71,25 +75,49 @@ export class EditTracker {
 
   constructor(readonly options: EditOptions) {}
 
-  /** One press of an input (a key, a MIDI key, a button, an onset). */
-  press(input: string, source: string, effect: Effect): void {
-    const p = this.pressed.get(input) ?? { source, effect, count: 0 };
+  /**
+   * One press of an input (a key, a MIDI key, a button, an onset), with its
+   * own repeat setting if it has one.
+   */
+  press(input: string, source: string, effect: Effect, repeat?: RepeatMode): void {
+    const p = this.pressed.get(input) ?? {
+      source,
+      effect,
+      count: 0,
+      ...(repeat ? { repeat } : {}),
+    };
     p.count++;
     this.pressed.set(input, p);
   }
 
-  /** A continuous sensor's reading, 0..1, with what it does. */
-  reading(id: string, source: string, x: number, map: SensorEffect): void {
+  /**
+   * A continuous sensor's reading, 0..1, with what it does, and its own
+   * zones-or-steps and repeat settings if it has them.
+   */
+  reading(
+    id: string,
+    source: string,
+    x: number,
+    map: SensorEffect,
+    own: { sensors?: SensorMode; repeat?: RepeatMode } = {},
+  ): void {
     const before = this.zones.get(id);
     const zone = zoneOf(x, before?.zone);
     if (!before) {
-      this.zones.set(id, { source, map, zone });
+      const sensors = own.sensors ?? this.options.sensors;
+      this.zones.set(id, {
+        source,
+        map,
+        zone,
+        sensors,
+        ...(own.repeat ? { repeat: own.repeat } : {}),
+      });
       return;
     }
     if (zone === before.zone) return;
-    if (this.options.sensors === 'steps') {
+    if (before.sensors === 'steps') {
       for (let i = Math.abs(zone - before.zone); i > 0; i--) {
-        this.press(`step:${id}`, source, map.effect);
+        this.press(`step:${id}`, source, map.effect, before.repeat);
       }
     }
     before.zone = zone;
@@ -99,11 +127,11 @@ export class EditTracker {
   edits(): EditView[] {
     const out: EditView[] = [];
     for (const [input, p] of this.pressed) {
-      const count = this.countOf(p.count);
+      const count = this.countOf(p.count, p.repeat ?? this.options.repeat);
       if (count !== 0) out.push({ input, source: p.source, effect: p.effect, count });
     }
-    if (this.options.sensors === 'zones') {
-      for (const [id, z] of this.zones) {
+    for (const [id, z] of this.zones) {
+      if (z.sensors === 'zones') {
         const count = z.map.centered ? z.zone - Math.floor(ZONES / 2) : z.zone;
         if (count !== 0) {
           out.push({
@@ -119,8 +147,8 @@ export class EditTracker {
     return out.sort((a, b) => (a.input < b.input ? -1 : a.input > b.input ? 1 : 0));
   }
 
-  private countOf(presses: number): number {
-    switch (this.options.repeat) {
+  private countOf(presses: number, repeat: RepeatMode): number {
+    switch (repeat) {
       case 'toggle':
         return presses % 2;
       case 'accumulate':

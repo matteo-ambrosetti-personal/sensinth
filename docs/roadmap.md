@@ -139,6 +139,18 @@ not what was wanted, and 3.10 replaces it.
 - A browser on a Mac says why it can't read the tilt and links to the Mac app; the Mac app's
   left–right tilt no longer jumps around ±180° on a Mac lying flat.
 
+## Phase 3.11: your own input map, start over, background play (done, pending a phone test)
+
+- **Deterministic options:** _Instruments_ can change or stay the seed's; **What each input
+  does** lets you give any key, group of keys, controller, sudden change or sensor another effect
+  (or none) on the tracks you pick, and its own repeat or zones/steps. Saved on the device.
+- **Start over** next to Play: a new piece from the top; in deterministic mode the seed's own
+  song with every change undone.
+- Picking a style sets its suggested tempo.
+- **Android:** the music keeps playing with the screen off or another app in front, through a
+  media foreground service with a Stop notification and a wake lock; the phone's sensors keep
+  reading while it plays.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /

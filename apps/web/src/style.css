@@ -188,6 +188,7 @@ h2 {
 
 /* Transport */
 .transport {
+  --play-size: 56px;
   position: relative;
   padding: 0;
   overflow: hidden;
@@ -203,7 +204,6 @@ h2 {
 
 /* Play sits in the scope's bottom-right corner, so the trace runs unbroken. */
 .play {
-  --play-size: 56px;
   position: absolute;
   right: 12px;
   top: calc(168px - 12px - var(--play-size));
@@ -234,7 +234,7 @@ h2 {
 }
 
 @media (min-width: 880px) {
-  .play {
+  .transport {
     --play-size: 64px;
   }
 
@@ -256,6 +256,48 @@ h2 {
 .play[aria-pressed='true'] {
   background: var(--ink);
   color: var(--panel);
+}
+
+/* Start over sits just left of Play, centred on it. */
+.restart {
+  --restart-size: 40px;
+  position: absolute;
+  right: calc(12px + var(--play-size, 56px) + 10px);
+  top: calc(168px - 12px - var(--play-size, 56px) / 2 - var(--restart-size) / 2);
+  width: var(--restart-size);
+  height: var(--restart-size);
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 120ms ease,
+    opacity 200ms ease;
+}
+
+.restart svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.restart:active {
+  transform: scale(0.94) rotate(-30deg);
+}
+
+.restart:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (min-width: 880px) {
+  .restart {
+    --restart-size: 44px;
+  }
 }
 
 .play-label {
@@ -471,34 +513,105 @@ input[type='range'] {
   color: var(--muted);
 }
 
-.keymap {
+/* What each input does: an editor, one row per key, group of keys or sensor */
+.det-map {
   margin-top: 12px;
   font-size: 14px;
 }
 
-.keymap summary {
+.det-map summary {
   cursor: pointer;
   color: var(--accent);
   font-weight: 500;
 }
 
-.keymap-table {
-  margin-top: 8px;
-  border-collapse: collapse;
-  width: 100%;
+.det-map-note {
+  margin: 8px 0 0;
+  color: var(--muted);
 }
 
-.keymap-table th,
-.keymap-table td {
-  text-align: left;
-  padding: 4px 8px 4px 0;
-  border-bottom: 1px solid var(--line);
-  vertical-align: top;
+.map-rows {
+  container-type: inline-size;
+  display: grid;
+  gap: 14px;
+  margin: 12px 0;
 }
 
-.keymap-table th {
+.map-group {
+  display: grid;
+  gap: 4px;
+}
+
+.map-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.map-row {
+  display: grid;
+  grid-template-columns: minmax(6.5em, 0.8fr) minmax(0, 2fr) minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+}
+
+.map-row.is-changed {
+  background: var(--inset);
+  border-left-color: var(--accent);
+}
+
+.map-name {
   font: 500 13px var(--font-mono);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.map-does {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.map-row select {
+  min-height: 34px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 13px var(--font-body);
+}
+
+.map-does .map-effect {
+  flex: 1 1 12em;
+}
+
+.map-does .map-target {
+  flex: 1 1 8em;
+}
+
+.map-row select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* In a narrow panel: the input's name on its own line, its menus below. */
+@container (max-width: 560px) {
+  .map-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+
+  .map-name {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Meters, shared by dials and sensors */
