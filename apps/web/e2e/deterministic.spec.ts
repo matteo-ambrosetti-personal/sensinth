@@ -172,16 +172,18 @@ test('keeps the seed’s instruments when asked', async ({ page }) => {
     .filter({ hasText: 'Swap instruments' });
   await expect(swap).toBeDisabled();
   await page.locator('#play').click();
-  const tracks = await page.locator('#tracks .track:not(.is-fx) .track-name').allTextContents();
+  // The rows appear with the first step: wait for them before reading the names.
+  const names = page.locator('#tracks .track:not(.is-fx) .track-name');
+  await expect(names.first()).toBeVisible({ timeout: 8000 });
+  const tracks = await names.allTextContents();
+  expect(tracks.length).toBeGreaterThanOrEqual(3);
   await page.locator('h1').first().click();
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Enter');
   await page.keyboard.press('KeyO');
   await expect(page.locator('#changes .change')).toHaveCount(1, { timeout: 4000 });
   await expect(page.locator('#changes .change')).toContainText('Key O');
-  expect(await page.locator('#tracks .track:not(.is-fx) .track-name').allTextContents()).toEqual(
-    tracks,
-  );
+  expect(await names.allTextContents()).toEqual(tracks);
 });
 
 test('a recording replays its key presses from Play, the same every time', async ({ page }) => {
