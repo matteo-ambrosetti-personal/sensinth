@@ -122,16 +122,22 @@ picked sensor's links run down the side.
 The native readers are built and tested in CI with fake bridges; the real sensors need a try on a
 Mac and an S23. Fan speed (it needs the SMC) is not read.
 
-## Phase 3.9: deterministic mode (done)
+## Phase 3.9: deterministic mode, first take (replaced)
 
-- A **Deterministic** switch and a **Seed** in the Style panel, for every style: the seed writes
-  the tracks and every section, and every input has a fixed, proportional effect.
-- Inputs are read at musical time from a log; key presses, MIDI keys and controller buttons are
-  events that play their own notes at their own time; onsets of fast sensors hit a percussion
-  voice.
-- Recordings keep presses; a replay starts over at Play.
-- Tests: identical runs for the same seed and script, structure independent of the inputs, and
-  proportional differences for typing 2% slower or light 2% brighter.
+The first deterministic mode made every input proportional and played each key as a note. It was
+not what was wanted, and 3.10 replaces it.
+
+## Phase 3.10: a looping song your inputs edit (done)
+
+- **Deterministic** in the Style panel: the seed writes a song that loops (2–16 bars) while
+  nothing changes; every key and sensor edits it its own fixed way, from the next bar, and edits
+  combine in any order.
+- Settings: what pressing the same key again does (toggles, adds up, counts once) and how
+  sensors act (zones or steps).
+- The Song panel lists the changes in effect and what every key does.
+- **Keyboard** is its own source, apart from the pointer.
+- A browser on a Mac says why it can't read the tilt and links to the Mac app; the Mac app's
+  left–right tilt no longer jumps around ±180° on a Mac lying flat.
 
 ## Phase 4: Pico sensor node
 

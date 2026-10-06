@@ -102,8 +102,8 @@ test('the modulation matrix routes every sensor at least twice', async ({ page }
 
 test('no sensor, no music', async ({ page }) => {
   await page.goto('/');
-  // A computer starts with the pointer and the clock: switch both off.
-  for (const id of ['pointer', 'device']) {
+  // A computer starts with the pointer, the keyboard and the clock: switch them off.
+  for (const id of ['pointer', 'keyboard', 'device']) {
     if (await page.locator(`#src-${id}`).isChecked()) {
       await page.locator(`label[for="src-${id}"]`).first().click();
     }

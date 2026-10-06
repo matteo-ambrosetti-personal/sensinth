@@ -1,5 +1,15 @@
 import type { SensorDescriptor, SensorHub } from '@sensinth/core';
+import { isMacApp } from './mac';
 import { nowSeconds, SourceError, type WebSensorSource } from './source';
+
+/** The Mac app's latest release. */
+const MAC_APP_URL =
+  'https://github.com/matteo-ambrosetti-personal/sensinth/releases/tag/mac-latest';
+
+/** A Mac (not an iPad, which also says "Macintosh" but has a touch screen). */
+function isMac(): boolean {
+  return /Macintosh|Mac OS X/.test(navigator.userAgent) && (navigator.maxTouchPoints ?? 0) <= 1;
+}
 
 interface PermissionRequestable {
   requestPermission?: () => Promise<'granted' | 'denied'>;
@@ -76,7 +86,19 @@ export class MotionSource implements WebSensorSource {
   private readonly onAbsolute = (e: DeviceOrientationEvent) => this.handleOrientation(e, true);
 
   unsupportedReason(): string | undefined {
+    // A Mac's accelerometer needs administrator rights, which no browser has.
+    if (isMac()) {
+      return isMacApp()
+        ? 'A Mac’s tilt comes from Mac motion, below.'
+        : 'Browsers can’t read a Mac’s tilt sensor: get the Mac app and turn on Mac motion.';
+    }
     return 'DeviceMotionEvent' in window ? undefined : 'This browser has no motion sensor access.';
+  }
+
+  helpLink(): { href: string; label: string } | undefined {
+    return isMac() && !isMacApp()
+      ? { href: MAC_APP_URL, label: 'Download Sensinth for Mac' }
+      : undefined;
   }
 
   async start(hub: SensorHub): Promise<void> {

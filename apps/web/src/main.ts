@@ -1,7 +1,13 @@
 import './style.css';
 import {
+  DEFAULT_LOOP_BARS,
+  LOOP_BARS,
+  REPEAT_MODES,
+  SENSOR_MODES,
   STYLES,
   SensorRecorder,
+  type RepeatMode,
+  type SensorMode,
   getStyle,
   parseRecording,
   type EngineView,
@@ -14,6 +20,7 @@ import { loadPrefs, savePrefs, type Prefs } from './prefs';
 import { CameraSource } from './sensors/camera';
 import { DeviceSource } from './sensors/device';
 import { GamepadSource } from './sensors/gamepad';
+import { KeyboardSource } from './sensors/keyboard';
 import { LidAngleSource } from './sensors/lid';
 import { MacMotionSource, MacSensorsSource, isMacApp } from './sensors/mac';
 import { LightSource } from './sensors/light';
@@ -31,6 +38,7 @@ import { nowSeconds } from './sensors/source';
 import { DialsView } from './ui/dials';
 import { FlowView } from './ui/flow/flow';
 import { LabView, SOURCE_NAMES } from './ui/lab';
+import { ChangesView, renderKeyMap } from './ui/changes';
 import { MatrixView } from './ui/matrix';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
@@ -118,9 +126,13 @@ renderStyles();
 // Sources -------------------------------------------------------------------
 const locationSource = new LocationSource();
 player.keyHint = () => locationSource.keyHint();
+const keyboard = new KeyboardSource();
+// While a deterministic song plays, keys such as Space and the arrows play it, not the page.
+keyboard.capture = () => player.playing && player.deterministic !== undefined;
 const sources = new SourceManager(player.hub, [
   new MotionSource(),
   new PointerSource(),
+  keyboard,
   new MicrophoneSource(),
   new CameraSource(),
   locationSource,
@@ -148,9 +160,9 @@ sourcesView.render();
  */
 function defaultSources(): Record<string, boolean> {
   if (isNativeApp()) return { motion: true, device: true, native: true };
-  if (isMacApp()) return { pointer: true, device: true, mac: true };
+  if (isMacApp()) return { pointer: true, keyboard: true, device: true, mac: true };
   const touch = window.matchMedia('(pointer: coarse)').matches;
-  return touch ? { motion: true, device: true } : { pointer: true, device: true };
+  return touch ? { motion: true, device: true } : { pointer: true, keyboard: true, device: true };
 }
 
 async function toggleSource(id: string, on: boolean): Promise<void> {
@@ -163,6 +175,8 @@ async function toggleSource(id: string, on: boolean): Promise<void> {
 }
 
 prefs.sources ??= defaultSources();
+// The keyboard used to be part of the pointer source: keep it on for whoever had that on.
+if (!('keyboard' in prefs.sources)) prefs.sources.keyboard = prefs.sources.pointer ?? false;
 for (const [id, on] of Object.entries(prefs.sources)) if (on) void sources.restore(id);
 
 // Recorder ------------------------------------------------------------------
@@ -242,12 +256,15 @@ function renderTransport(): void {
   playBtn.disabled = !canPlay;
   const channels = player.hub.list();
   const playingSeed = player.view()?.snapshot.seed;
+  const tilt =
+    isMacApp() && !sources.isOn('macMotion') ? ' Turn on Mac motion to play with tilt.' : '';
   if (!canPlay) hint.textContent = 'Turn on at least one sensor source. No sensor, no music.';
   else if (!playing && seeded)
-    hint.textContent = `Seed ${seeded.seed}: the same gestures at the same times play the same music.`;
-  else if (!playing) hint.textContent = 'You set tempo and style. The sensors write the rest.';
+    hint.textContent = `Seed ${seeded.seed}: a song that loops until you change something.${tilt}`;
+  else if (!playing)
+    hint.textContent = `You set tempo and style. The sensors write the rest.${tilt}`;
   else if (playingSeed !== undefined)
-    hint.textContent = `Seed ${playingSeed}. Every key you type plays a note; every sensor moves the music the same way each time.`;
+    hint.textContent = `Seed ${playingSeed}. Each key and sensor changes the song its own way, from the next bar; with no change it loops.`;
   else if (player.view()?.snapshot.waiting ?? true)
     hint.textContent = 'Waiting for a sensor… the music starts on the next bar after one sends.';
   else if (channels.some((c) => c.desc.source === 'phone'))
@@ -261,7 +278,9 @@ sources.onChange = () => {
   renderTransport();
 };
 
-playBtn.addEventListener('click', async () => {
+playBtn.addEventListener('click', async (event) => {
+  // After a click, let Space and Enter reach the music rather than this button.
+  if (event.detail > 0) playBtn.blur();
   if (player.playing) player.stop();
   else {
     if (!anySourceOn() && !player.deterministic) return;
@@ -279,31 +298,56 @@ renderTransport();
 // Deterministic mode ---------------------------------------------------------
 const detOn = $<HTMLInputElement>('det-on');
 const detSeed = $<HTMLInputElement>('det-seed');
+const detLoop = $<HTMLSelectElement>('det-loop');
+const detRepeat = $<HTMLSelectElement>('det-repeat');
+const detSensors = $<HTMLSelectElement>('det-sensors');
 const detDesc = $('det-desc');
 detOn.checked = prefs.deterministic ?? false;
 detSeed.value = String(prefs.seed ?? 42);
+detLoop.value = String(
+  LOOP_BARS.includes(prefs.loopBars ?? 0) ? prefs.loopBars : DEFAULT_LOOP_BARS,
+);
+detRepeat.value = REPEAT_MODES.includes(prefs.repeat as RepeatMode)
+  ? (prefs.repeat as string)
+  : 'toggle';
+detSensors.value = SENSOR_MODES.includes(prefs.sensors as SensorMode)
+  ? (prefs.sensors as string)
+  : 'zones';
 
 function readSeed(): number {
   const v = Math.floor(Number(detSeed.value));
   return Number.isFinite(v) && v >= 0 ? Math.min(v, 0xffffffff) : 42;
 }
 
+const REPEAT_TEXT: Record<RepeatMode, string> = {
+  toggle: 'Pressing a key again undoes it.',
+  accumulate: 'Pressing a key again does it once more.',
+  once: 'Only the first press of each key counts.',
+};
+const SENSOR_TEXT: Record<SensorMode, string> = {
+  zones: 'Sensors act by zone: back in a zone, back to its song.',
+  steps: 'Sensors act in steps: each zone crossed counts as a press.',
+};
+
 function applyDeterministic(): void {
   const seed = readSeed();
+  const loopBars = Number(detLoop.value);
+  const repeat = detRepeat.value as RepeatMode;
+  const sensors = detSensors.value as SensorMode;
   detSeed.value = String(seed);
-  player.setDeterministic(detOn.checked ? seed : undefined);
-  detSeed.disabled = !detOn.checked;
-  prefs.deterministic = detOn.checked;
-  prefs.seed = seed;
+  player.setDeterministic(detOn.checked ? { seed, loopBars, repeat, sensors } : undefined);
+  for (const el of [detSeed, detLoop, detRepeat, detSensors]) el.disabled = !detOn.checked;
+  Object.assign(prefs, { deterministic: detOn.checked, seed, loopBars, repeat, sensors });
   savePrefs(prefs);
   const later = player.playing ? ' Takes effect at the next Play.' : '';
   detDesc.textContent = detOn.checked
-    ? `The seed writes the tracks. Each sensor moves the music by a fixed amount, and every key you type plays its own note when you type it.${later}`
+    ? `The seed writes a ${loopBars}-bar song that loops until something changes. Every key and sensor changes it its own way, the same way every time. ${REPEAT_TEXT[repeat]} ${SENSOR_TEXT[sensors]}${later}`
     : `Off: the sensors write everything, so the smallest change plays different music.${later}`;
   renderTransport();
 }
-detOn.addEventListener('change', applyDeterministic);
-detSeed.addEventListener('change', applyDeterministic);
+for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors]) {
+  el.addEventListener('change', applyDeterministic);
+}
 applyDeterministic();
 
 // A replay starts over at Play, so a recording always plays the same piece.
@@ -399,6 +443,14 @@ const tracksView = new TracksView($('tracks'), $('tracks-empty'), {
 });
 const channelLabel = (id: string) => player.hub.get(id)?.desc.label ?? id;
 const matrixView = new MatrixView($('matrix'), $('matrix-empty'), channelLabel);
+const changesView = new ChangesView(
+  $('song-panel'),
+  $('song-loop'),
+  $('changes'),
+  $('changes-empty'),
+);
+renderKeyMap($('keymap'));
+const genomeSectionLabel = $('g-section-label');
 const genomeHashLabel = $('g-hash-label');
 const genomeChangeLabel = $('g-change-label');
 const tracksNote = $('tracks-note');
@@ -420,6 +472,7 @@ const REBUILD = {
   scene: 'new scene',
   style: 'new style',
   resume: 'sensors back',
+  edit: 'your edit',
 };
 
 function renderGenome(view: EngineView | undefined): void {
@@ -428,19 +481,25 @@ function renderGenome(view: EngineView | undefined): void {
     for (const el of Object.values(genome)) el.textContent = '–';
     return;
   }
-  genome.section.textContent = `${snap.section + 1} · phrase ${snap.phrase + 1}`;
+  const song = view.song;
+  genomeSectionLabel.textContent = song ? 'Loop' : 'Section';
+  genome.section.textContent = song
+    ? `bar ${song.loopBar + 1} of ${song.loopBars}`
+    : `${snap.section + 1} · phrase ${snap.phrase + 1}`;
   genomeHashLabel.textContent = snap.seed !== undefined ? 'Seed' : 'Genome';
   genome.hash.textContent = snap.seed !== undefined ? String(snap.seed) : `#${snap.genome}`;
   genome.key.textContent = `${snap.keyName}, ${KEY_SOURCE[view.keySource]}`;
   tracksNote.textContent =
     snap.seed !== undefined ? 'written by the seed' : 'written by the sensors';
-  // Deterministic mode rewrites only on section lines; show the notes you played instead.
-  genomeChangeLabel.textContent = snap.seed !== undefined ? 'Your notes' : 'Last rewrite';
+  // Deterministic mode: the song version and how many changes made it.
+  genomeChangeLabel.textContent = song ? 'Version' : 'Last rewrite';
   const r = view.rebuild;
-  genome.change.textContent =
-    snap.seed !== undefined
-      ? String(player.eventNotes)
-      : `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
+  const changes = song?.edits.length ?? 0;
+  genome.change.textContent = song
+    ? song.version === 'base'
+      ? 'the seed’s own'
+      : `${song.version} · ${changes} change${changes === 1 ? '' : 's'}`
+    : `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
 }
 
 let lastTracks = 0;
@@ -487,6 +546,7 @@ function frame(t: number): void {
     nowChord.textContent = live ? `${snap.chordRoman} · ${snap.chordName}` : '–';
     nowPos.textContent = live ? `${snap.bar + 1}.${snap.beat + 1}` : '–';
     renderGenome(view);
+    changesView.update(view);
     matrixView.update(view);
     if (snap?.waiting !== lastWaiting) {
       lastWaiting = snap?.waiting;

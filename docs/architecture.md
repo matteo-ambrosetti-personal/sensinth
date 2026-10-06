@@ -151,46 +151,40 @@ dozen steps: the smallest difference in a reading ends up audible.
 
 ## Deterministic mode (`core/src/seeded`)
 
-`new Engine({ style, deterministic: { seed, origin, inputDelay } })` swaps the four paths above for
-a mode where the seed writes the structure and every input has a fixed, proportional effect.
+`new Engine({ style, deterministic: { seed, origin, loopBars, repeat, sensors } })` swaps the four
+paths above for a song that loops while nothing changes, and that every input edits in its own
+fixed way.
 
-- **Structure from the seed.** `buildSeededGenome` calls `buildGenome` with a fingerprint made
-  from the seed, so machines and track count come from (seed, style) and each section's
-  patterns, LFOs, internal routes and harmony settings from (seed, section). Mutations use
-  (seed, section, bar) with a fixed amount; fills and section endings use a fixed `variation`.
-  There are no scene changes and no chain through the sensors. The key comes from the seed.
-  `Harmony.reseed` runs before every chord, so a substitution drawn (or not) never shifts the
-  chords after it.
-- **Inputs at musical time.** `InputModel` taps the hub and keeps every channel's readings and
-  events with their times. Step _k_ reads every channel at `origin + elapsed(k) − inputDelay`
-  (0.2 s, more than the scheduler's look-ahead), holding the latest reading at that time, so the
-  result depends only on what the sensors did and when. `absoluteScale` maps a reading with a
-  fixed curve: linear over a fixed range, logarithmic over a wide learned one (lux, speeds), and
-  around the value at Play for a channel with no range. Level, activity and trend are smoothed
-  per step with fixed constants.
-- **Presses.** `SensorHub.emit` carries discrete events: keys (`keyIndex`), MIDI notes and
-  controller buttons; onsets of fast channels are found in the readings since Play, sample by
-  sample. A press channel's level is a kernel density of press times,
-  `Σ (t − tᵢ)/τ² · e^{−(t − tᵢ)/τ}` with τ = 1 s, continuous in every press time. Presses also
-  push `energy`.
-- **Routes.** Each channel gets two routes per section from (seed, section, channel id), so adding
-  a sensor never moves another's. Only `lin` and `exp` curves, and no destinations that amplify
-  small differences (chaos rates, LFO rates); no `jitter`. Routes are added to the section's
-  matrix when a channel first appears. `energy` and `variation` also move every rhythmic track's
-  probability, against patterns written a little busier and thinned by default, so inputs can
-  both fill in and thin out.
-- **Event notes.** Every event becomes a note on one of two voices the seed picks from the
-  palette (`ev`, melodic; `hit`, a drum), realized against the harmony of the step it falls in
-  (`eventPitch`), and handed to `onEventNotes` with its exact time. The player plays it
-  `EVENT_LATENCY` (60 ms) after the event with `Renderer.playAt`, off the grid.
-- **Recordings** keep events, and the web app rewinds a replay to Play, so a recording replays
-  the identical piece. `renderOffline` takes `deterministic`, scripted `keys` and `events`.
+- **The song** (`song.ts`). `baseSong(style, seed, loopBars)` writes the tracks once from (seed,
+  style) through `buildSeededGenome`, and `buildSong(base, edits)` applies the edits to a copy and
+  writes the chord loop: `Harmony` with fixed inputs, reseeded before every chord, moving at
+  every chord change (`advance(…, move)`), starting from the chord the "chords" edit picks
+  (`startAt`).
+- **Exact loops.** The engine plays step `pos = step mod (loopBars × 16)`. At every loop start it
+  rebuilds the runners (same roll seeds), the realizers, the matrix (LFOs, chaos maps,
+  envelopes) and the effect queue, so every pass plays the same notes. The last bar of a loop of
+  four bars or more plays the fills. The renderer's humanize comes from a hash of (part, step mod
+  768, note) instead of a running generator.
+- **Edits** (`effects.ts`, `edits.ts`). An edit is an effect with a count `c`: about twenty
+  operations (rotate, rewrite, mute, octave, thin, fill, reverse, rolls, swap instruments, add a
+  track, drums out, effect throws, half and double time, key up a fifth or a semitone, mode,
+  chords, chord speed, swing, space, brightness), each cycling so every count changes something.
+  Edits run in phases (tracks, machines, patterns, sound, mutes, harmony and mix), sorted by
+  input within a phase, so the result never depends on the order of the presses.
+  `KEY_EFFECTS` maps physical keys (`KeyboardEvent.code`) to effects; MIDI keys, buttons and
+  unknown keys pick from the same list; onsets and continuous sensors have their own by kind.
+- **Counting.** `EditTracker` turns presses into counts by the repeat setting (toggle: presses mod
+  2; accumulate: presses; once: at most 1) and readings into zones (five, with hysteresis 0.04):
+  in zones mode the zone is the count (−2..2 for sensors that lean either way, 0..4 for
+  amounts); in steps mode every zone crossed is a press.
+- **Timing.** `InputModel` keeps every channel's readings and presses with their times; every
+  step reads them 0.2 s behind the music. Edits apply at bar lines: the song is rebuilt when the
+  edits' version changes, and the new song is fast-forwarded silently from the loop start to the
+  current position, so the music at any moment is a function of (edits, position).
 
-The tests check that the same seed and script give identical notes, that inputs never change
-machines or patterns, that typing 2% slower moves each event note by exactly its offset and
-changes about 0.1% of grid notes (40% slower: about 4%), and that params move monotonically with
-a reading. The sensor-driven mode is unchanged and keeps its own test that a 2% change rewrites
-most bars.
+The tests check exact loops in every style, a new song from the bar after a press and its loop,
+the same version and notes whenever the press came, the three repeat settings, zones and steps,
+combinations in either order, every note in the scale under every key, and replays.
 
 ## Harmony: the rules that keep it musical (`core/src/composer`, `core/src/seq/realize.ts`)
 

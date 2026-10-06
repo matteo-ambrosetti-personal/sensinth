@@ -815,6 +815,7 @@ const REBUILD: Record<EngineView['rebuild']['reason'], string> = {
   scene: 'new scene',
   style: 'new style',
   resume: 'sensors back',
+  edit: 'new version',
 };
 
 /** Columns, left to right: sensors, modulators, tracks, mix. */

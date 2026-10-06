@@ -1,12 +1,12 @@
 import {
-  EVENT_LATENCY,
   Engine,
   FX_INFO,
   SimulatedSource,
   STEPS_PER_BAR,
+  keyCodeIndex,
   stepDuration,
+  type DeterministicOptions,
   type FxId,
-  keyIndex,
   type NoteEvent,
   type SensorDescriptor,
   type SensorEvent,
@@ -35,17 +35,17 @@ export interface OfflineRenderOptions {
   /** Fires this effect at full depth on the second beat of every other bar. */
   forceFx?: FxId;
   /**
-   * Deterministic mode with this seed. Sensors default to none: add some
-   * with `sensors`, and presses with `keys` or `events`.
+   * Deterministic mode: a looping song the inputs edit. Sensors default to
+   * none: add some with `sensors`, and presses with `keys` or `events`.
    */
-  deterministic?: { seed: number };
-  /** A key pressed every `interval` seconds, from `start` (default 0.5 s). */
-  keys?: { key: string; interval: number; start?: number };
+  deterministic?: Omit<DeterministicOptions, 'origin' | 'inputDelay'>;
+  /** Keys pressed at given times: `KeyboardEvent.code` and seconds from the start. */
+  keys?: readonly { code: string; at: number }[];
   /** Presses at given times (seconds from the start). */
   events?: readonly SensorEvent[];
 }
 
-/** The typing channel that scripted presses belong to, as the Pointer & keys source announces it. */
+/** The typing channel that scripted presses belong to, as the Keyboard source announces it. */
 export const SCRIPT_KEYS: SensorDescriptor = {
   id: 'computer.keys',
   kind: 'keys.rate',
@@ -68,8 +68,8 @@ export interface RenderStats {
   events: number;
   /** Triggered effects among the events. */
   fx: number;
-  /** Notes played by presses and onsets (deterministic mode). */
-  eventNotes: number;
+  /** Deterministic mode: every song version heard, in order (`base` with no edits). */
+  versions: string[];
   /** Track slots that existed during the render. */
   tracks: string[];
 }
@@ -94,23 +94,19 @@ export async function renderOffline(
   const engine = new Engine({
     style,
     seed: opts.seed ?? 0,
-    ...(det ? { deterministic: { seed: det.seed, origin: start } } : {}),
+    ...(det ? { deterministic: { ...det, origin: start } } : {}),
   });
   const sensors: SensorScript =
     opts.sensors ??
     (det ? { descriptors: [], sampleAt: () => [] } : new SimulatedSource(opts.sensorSeed ?? 7));
   for (const d of sensors.descriptors) engine.hub.announce(d);
-  const presses = scriptedPresses(opts, start, steps * stepSeconds);
+  const presses = scriptedPresses(opts, start);
   if (presses.some((e) => e.id === SCRIPT_KEYS.id) && !engine.hub.get(SCRIPT_KEYS.id)) {
     engine.hub.announce(SCRIPT_KEYS);
   }
   const renderer = new Renderer(ctx, style);
   renderer.setTempo(bpm);
-  let eventNotes = 0;
-  engine.onEventNotes = (notes) => {
-    for (const n of notes) renderer.playAt(n.note, start + n.time + EVENT_LATENCY, stepSeconds);
-    eventNotes += notes.length;
-  };
+  const versions: string[] = [];
 
   let events = 0;
   let fx = 0;
@@ -140,6 +136,8 @@ export async function renderOffline(
       }
       if (opts.mute) renderer.setMuted('fx', opts.mute('fx'));
     }
+    const song = engine.view().song?.version;
+    if (song !== undefined && versions[versions.length - 1] !== song) versions.push(song);
     events += evs.length;
     fx += evs.filter((e) => e.fx).length;
     const view = engine.view();
@@ -158,35 +156,28 @@ export async function renderOffline(
   const buffer = await ctx.startRendering();
   return {
     buffer,
-    stats: { ...analyze(buffer), events, fx, eventNotes, tracks: [...slots].sort() },
+    stats: { ...analyze(buffer), events, fx, versions, tracks: [...slots].sort() },
   };
 }
 
 /** Every scripted press, stamped on the render's clock, in time order. */
-function scriptedPresses(
-  opts: OfflineRenderOptions,
-  start: number,
-  seconds: number,
-): SensorEvent[] {
+function scriptedPresses(opts: OfflineRenderOptions, start: number): SensorEvent[] {
   const out: SensorEvent[] = (opts.events ?? []).map((e) => ({ ...e, t: start + e.t }));
-  const keys = opts.keys;
-  if (keys && keys.interval > 0) {
-    for (let t = keys.start ?? 0.5; t < seconds; t += keys.interval) {
-      out.push({
-        id: SCRIPT_KEYS.id,
-        t: start + t,
-        kind: 'key',
-        value: keyIndex(keys.key),
-        velocity: 0.8,
-      });
-    }
+  for (const k of opts.keys ?? []) {
+    out.push({
+      id: SCRIPT_KEYS.id,
+      t: start + k.at,
+      kind: 'key',
+      value: keyCodeIndex(k.code),
+      velocity: 0.8,
+    });
   }
   return out.sort((a, b) => a.t - b.t);
 }
 
 export function analyze(
   buffer: AudioBuffer,
-): Omit<RenderStats, 'events' | 'fx' | 'eventNotes' | 'tracks'> {
+): Omit<RenderStats, 'events' | 'fx' | 'versions' | 'tracks'> {
   let peak = 0;
   let sumSq = 0;
   let nonFinite = 0;

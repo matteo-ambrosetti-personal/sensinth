@@ -124,11 +124,6 @@ export class ModMatrix {
     this.refreshInternal();
   }
 
-  /** Adds routes, e.g. for a sensor switched on in the middle of a section. */
-  addRoutes(routes: readonly Route[]): void {
-    this.routes.push(...routes);
-  }
-
   /** Sets an external source (sensor feature or macro). Non-finite values are ignored. */
   setSource(id: string, value: number): void {
     if (Number.isFinite(value)) this.values.set(id, clamp(value, -1, 1));

@@ -1,8 +1,8 @@
 import { LookaheadScheduler, Renderer, type BusId } from '@sensinth/audio';
 import {
-  EVENT_LATENCY,
   Engine,
   SensorHub,
+  type DeterministicOptions,
   type EngineSnapshot,
   type EngineView,
   type FxId,
@@ -11,6 +11,11 @@ import {
 } from '@sensinth/core';
 import { nowSeconds } from './sensors/source';
 import { ScreenWakeLock } from './wakeLock';
+
+/** What deterministic mode is set to: the seed, the loop and how inputs act. */
+export type SongSettings = Required<
+  Pick<DeterministicOptions, 'seed' | 'loopBars' | 'repeat' | 'sensors'>
+>;
 
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
 const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
@@ -24,9 +29,9 @@ const START_DELAY = 0.08;
  * press of Play starts a new piece; the sensors pick everything in it. With
  * no live sensor, nothing plays.
  *
- * In deterministic mode the seed picks the tracks instead, the inputs are
- * read on the music's own clock from the moment Play is pressed, and every
- * press plays its note at its own time. It plays with no sensor too.
+ * In deterministic mode the seed writes a song that loops until an input
+ * changes; each input edits it its own way, read on the music's own clock
+ * from the moment Play is pressed. It plays with no sensor too.
  */
 export class Player {
   readonly hub = new SensorHub();
@@ -47,15 +52,13 @@ export class Player {
   private current: EngineView | undefined;
   /** Pitch class to start each new piece in, e.g. from the current place. */
   keyHint: () => number | undefined = () => undefined;
-  /** Deterministic mode and its seed, applied at the next Play. */
-  private seeded: { seed: number } | undefined;
+  /** Deterministic mode and its settings, applied at the next Play. */
+  private seeded: SongSettings | undefined;
   /**
    * Called just before a piece starts, with the sensor-clock time of its
    * first step: deterministic mode rewinds replays to it.
    */
   beforeStart: (origin: number) => void = () => {};
-  /** Notes played by presses and onsets since Play. */
-  eventNotes = 0;
 
   constructor(style: Style, bpm: number) {
     this.style = style;
@@ -115,12 +118,12 @@ export class Player {
     return this.current;
   }
 
-  /** Turns deterministic mode on with a seed, or off; takes effect at the next Play. */
-  setDeterministic(seed: number | undefined): void {
-    this.seeded = seed === undefined ? undefined : { seed };
+  /** Turns deterministic mode on with its settings, or off; takes effect at the next Play. */
+  setDeterministic(settings: SongSettings | undefined): void {
+    this.seeded = settings ? { ...settings } : undefined;
   }
 
-  get deterministic(): { seed: number } | undefined {
+  get deterministic(): SongSettings | undefined {
     return this.seeded;
   }
 
@@ -130,15 +133,13 @@ export class Player {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     await ctx.resume();
     this.ctx = ctx;
-    // Step 0 sounds START_DELAY from now, on both clocks.
-    const audio0 = ctx.currentTime + START_DELAY;
+    // Step 0 sounds START_DELAY from now.
     const origin = nowSeconds() + START_DELAY;
     if (this.seeded) this.beforeStart(origin);
     this.engine.dispose();
     this.engine = this.newEngine(this.seeded ? origin : undefined);
     this.views = [];
     this.current = undefined;
-    this.eventNotes = 0;
 
     this.scope = ctx.createAnalyser();
     this.scope.fftSize = 2048;
@@ -149,15 +150,6 @@ export class Player {
     renderer.setTempo(this.bpm);
     for (const slot of this.muted) renderer.setMuted(slot, true);
     this.renderer = renderer;
-    // Presses and onsets play at their own time, a moment later.
-    this.engine.onEventNotes = (notes) => {
-      for (const n of notes) {
-        renderer.playAt(n.note, audio0 + n.time + EVENT_LATENCY);
-        if (n.note.voice)
-          this.noteHits([n.note], audio0 + n.time + EVENT_LATENCY - ctx.currentTime);
-      }
-      this.eventNotes += notes.length;
-    };
 
     let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
@@ -252,7 +244,7 @@ export class Player {
       style: this.style,
       hub: this.hub,
       ...(keyRoot !== undefined ? { keyRoot } : {}),
-      ...(seeded && origin !== undefined ? { deterministic: { seed: seeded.seed, origin } } : {}),
+      ...(seeded && origin !== undefined ? { deterministic: { ...seeded, origin } } : {}),
     });
     engine.router.setSolo(this.soloId);
     return engine;

@@ -414,6 +414,93 @@ input[type='range'] {
   margin-top: 8px;
 }
 
+.seeded-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  margin-top: 12px;
+}
+
+.seed-field select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--inset);
+  color: var(--ink);
+  font: 500 14px var(--font-body);
+}
+
+.seed-field select:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* The song in deterministic mode: its loop, its changes and the key map */
+.song-loop {
+  margin: 0 0 10px;
+  font: 500 14px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.change {
+  display: grid;
+  grid-template-columns: minmax(7em, auto) 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--inset);
+  font-size: 14px;
+}
+
+.change-source {
+  font-weight: 600;
+}
+
+.change-count {
+  font: 500 13px var(--font-mono);
+  color: var(--muted);
+}
+
+.keymap {
+  margin-top: 12px;
+  font-size: 14px;
+}
+
+.keymap summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.keymap-table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.keymap-table th,
+.keymap-table td {
+  text-align: left;
+  padding: 4px 8px 4px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.keymap-table th {
+  font: 500 13px var(--font-mono);
+  white-space: nowrap;
+}
+
 /* Meters, shared by dials and sensors */
 .meter {
   position: relative;
@@ -661,6 +748,14 @@ input[type='range'] {
 .source-msg {
   font-size: 13px;
   color: var(--muted);
+}
+
+.source-link {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
 }
 
 .source.is-error .source-msg {

@@ -40,7 +40,7 @@
         <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
         <dl class="genome" aria-label="What the sensors chose">
           <div>
-            <dt>Section</dt>
+            <dt id="g-section-label">Section</dt>
             <dd id="g-section">–</dd>
           </div>
           <div>
@@ -253,7 +253,47 @@
                 />
               </label>
             </div>
+            <div id="det-options" class="seeded-options">
+              <label class="seed-field">
+                Loop
+                <select id="det-loop">
+                  <option value="2">2 bars</option>
+                  <option value="4">4 bars</option>
+                  <option value="8">8 bars</option>
+                  <option value="12">12 bars</option>
+                  <option value="16">16 bars</option>
+                </select>
+              </label>
+              <label class="seed-field">
+                Same key again
+                <select id="det-repeat">
+                  <option value="toggle">Toggles</option>
+                  <option value="accumulate">Adds up</option>
+                  <option value="once">Counts once</option>
+                </select>
+              </label>
+              <label class="seed-field">
+                Sensors
+                <select id="det-sensors">
+                  <option value="zones">Zones</option>
+                  <option value="steps">Steps</option>
+                </select>
+              </label>
+            </div>
             <p id="det-desc" class="style-desc"></p>
+          </section>
+
+          <section id="song-panel" class="panel play-only" aria-labelledby="song-title" hidden>
+            <h2 id="song-title">Song <span class="h2-note">edited by your inputs</span></h2>
+            <p id="song-loop" class="song-loop">–</p>
+            <ul id="changes" class="changes"></ul>
+            <p id="changes-empty" class="empty">
+              No changes: the song loops as it is. Press a key or move a sensor.
+            </p>
+            <details class="keymap">
+              <summary>What each key does</summary>
+              <table id="keymap" class="keymap-table"></table>
+            </details>
           </section>
 
           <section class="panel" aria-labelledby="dials-title">

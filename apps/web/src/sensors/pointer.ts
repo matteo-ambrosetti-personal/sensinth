@@ -1,4 +1,4 @@
-import { keyIndex, type SensorDescriptor, type SensorHub } from '@sensinth/core';
+import type { SensorDescriptor, SensorHub } from '@sensinth/core';
 import { nowSeconds, type WebSensorSource } from './source';
 
 const SPEED: SensorDescriptor = {
@@ -36,56 +36,26 @@ const FORCE: SensorDescriptor = {
   rateHz: 30,
   source: 'computer',
 };
-const KEYS: SensorDescriptor = {
-  id: 'computer.keys',
-  kind: 'keys.rate',
-  label: 'Typing',
-  unit: 'keys/s',
-  range: [0, 15],
-  adaptive: true,
-  minSpan: 3,
-  rateHz: 30,
-  source: 'computer',
-};
-
-const CHANNELS = [SPEED, POINTER_X, POINTER_Y, FORCE, KEYS];
-
-/** Keys that only modify others, or move focus: not presses of their own. */
-const IGNORED_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Fn']);
-
-/** True when the key goes into a text field (the seed, a file name), not into the music. */
-function typingIntoField(e: KeyboardEvent): boolean {
-  const el = e.target as HTMLElement | null;
-  if (!el || typeof el.closest !== 'function') return false;
-  if (el.isContentEditable) return true;
-  const field = el.closest('input, textarea, select');
-  if (!field) return false;
-  const type = (field as HTMLInputElement).type;
-  return (
-    !(field instanceof HTMLInputElement) || !['checkbox', 'radio', 'range', 'button'].includes(type)
-  );
-}
+const CHANNELS = [SPEED, POINTER_X, POINTER_Y, FORCE];
 
 /** Safari's Force Touch event: 1 at a click, 2 at a deep (force) click, up to 3. */
 type ForceEvent = MouseEvent & { webkitForce?: number };
 
 /**
- * A laptop has no motion sensor, so the trackpad, mouse and keyboard stand
- * in: pointer speed (and scrolling) drives energy, its height the melody's
- * register, left–right the timbre, how hard you press (Force Touch in
- * Safari and the Mac app, pens elsewhere) and typing raise accents. Every
- * key press is also an event with its key, which deterministic mode plays
- * as a note.
+ * A laptop has no motion sensor, so the trackpad or mouse stands in:
+ * pointer speed (and scrolling) drives energy, its height the melody's
+ * register, left–right the timbre, and how hard you press (Force Touch in
+ * Safari and the Mac app, pens elsewhere) raises accents. The keyboard is a
+ * source of its own.
  */
 export class PointerSource implements WebSensorSource {
   readonly id = 'pointer';
-  readonly label = 'Pointer & keys';
-  readonly description = 'Trackpad, mouse, scrolling, press force and typing';
+  readonly label = 'Pointer';
+  readonly description = 'Trackpad or mouse: movement, position, scrolling and press force';
   private distance = 0;
   private x = 0.5;
   private y = 0.5;
   private lastPos: { x: number; y: number } | undefined;
-  private keyTimes: number[] = [];
   private force = 0;
   private forceTouch = false;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -114,20 +84,12 @@ export class PointerSource implements WebSensorSource {
   private readonly onWheel = (e: WheelEvent) => {
     this.distance += Math.min(400, Math.hypot(e.deltaX, e.deltaY));
   };
-  private readonly onKey = (e: KeyboardEvent) => {
-    if (e.repeat || IGNORED_KEYS.has(e.key) || typingIntoField(e)) return;
-    const t = nowSeconds();
-    this.keyTimes.push(t);
-    this.hub?.emit({ id: KEYS.id, t, kind: 'key', value: keyIndex(e.key), velocity: 0.8 });
-  };
-  private hub: SensorHub | undefined;
 
   unsupportedReason(): string | undefined {
     return 'PointerEvent' in window ? undefined : 'This browser has no pointer events.';
   }
 
   async start(hub: SensorHub): Promise<void> {
-    this.hub = hub;
     for (const d of CHANNELS) hub.announce(d);
     window.addEventListener('pointermove', this.onMove, { passive: true });
     window.addEventListener('pointerdown', this.onPress, { passive: true });
@@ -135,18 +97,15 @@ export class PointerSource implements WebSensorSource {
     window.addEventListener('pointerup', this.onRelease, { passive: true });
     window.addEventListener('webkitmouseforcechanged', this.onForce);
     window.addEventListener('wheel', this.onWheel, { passive: true });
-    window.addEventListener('keydown', this.onKey);
     this.lastTick = nowSeconds();
     this.timer = setInterval(() => {
       const t = nowSeconds();
       const dt = Math.max(0.001, t - this.lastTick);
       this.lastTick = t;
-      this.keyTimes = this.keyTimes.filter((k) => t - k < 1);
       hub.push({ id: SPEED.id, t, v: this.distance / dt });
       hub.push({ id: POINTER_X.id, t, v: this.x });
       hub.push({ id: POINTER_Y.id, t, v: this.y });
       hub.push({ id: FORCE.id, t, v: this.force });
-      hub.push({ id: KEYS.id, t, v: this.keyTimes.length });
       this.distance = 0;
     }, 33);
   }
@@ -160,8 +119,6 @@ export class PointerSource implements WebSensorSource {
     window.removeEventListener('pointerup', this.onRelease);
     window.removeEventListener('webkitmouseforcechanged', this.onForce);
     window.removeEventListener('wheel', this.onWheel);
-    window.removeEventListener('keydown', this.onKey);
     for (const d of CHANNELS) hub.remove(d.id);
-    this.hub = undefined;
   }
 }

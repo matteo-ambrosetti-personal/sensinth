@@ -16,6 +16,8 @@ export interface WebSensorSource {
   stop(hub: SensorHub): void;
   /** Optional element to show while running (e.g. a camera thumbnail). */
   readonly preview?: HTMLElement;
+  /** Where to go when the source is unavailable here, e.g. the Mac app's download. */
+  helpLink?(): { href: string; label: string } | undefined;
 }
 
 /** A failure with a message written for the user. */

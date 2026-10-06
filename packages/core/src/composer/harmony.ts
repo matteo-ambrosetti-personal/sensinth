@@ -9,6 +9,9 @@ import { Scale, byBrightness, type ModeId } from '../theory/scales';
 /** How unstable each scale degree's chord sounds: I is home, V and vii pull hardest. */
 const DEGREE_TENSION = [0, 0.5, 0.35, 0.45, 0.8, 0.25, 0.95];
 
+/** Chords a progression may start from, most common first: I, vi, IV, V, ii, vii, iii. */
+const START_DEGREES = [0, 5, 3, 4, 1, 6, 2];
+
 /** What harmony reads from the sensors, each 0..1. */
 export interface HarmonyInputs {
   tension: number;
@@ -102,6 +105,26 @@ export class Harmony {
     this.rng = new Rng(seed);
   }
 
+  /**
+   * Starts again from another chord: a position of the form (blues, jazz),
+   * or a scale degree's chord, by `position` through I, vi, IV, V, ii, vii, iii.
+   */
+  startAt(position: number, inputs: Readonly<HarmonyInputs>): void {
+    if (this.palette.chordScales) {
+      this.form = this.formFor(inputs.brightness);
+      const length = Math.max(1, this.form?.sequence.length ?? 1);
+      this.formIndex = mod(position, length);
+      this.local = this.chordAt(this.formIndex, inputs);
+      this.nextLocal = this.chordAt((this.formIndex + 1) % length, inputs);
+      this.applyLocal(inputs);
+      return;
+    }
+    const degrees = START_DEGREES.filter((d) => d in this.palette.progression);
+    const degree = degrees[mod(position, Math.max(1, degrees.length))] ?? 0;
+    this.chord = { degree, size: this.sizeFor(inputs) };
+    this.next = this.chooseNext(this.chord, inputs, false, true);
+  }
+
   /** New genome: new modes or forms to choose from and a new progression bias. */
   setGenes(palette: Palette, genes: HarmonyGenes, inputs: Readonly<HarmonyInputs>): void {
     const wasChordScales = !!this.palette.chordScales;
@@ -174,8 +197,12 @@ export class Harmony {
     }
   }
 
-  /** Moves to the next chord and plans the one after it. */
-  advance(inputs: Readonly<HarmonyInputs>, nextStartsPhrase: boolean): void {
+  /**
+   * Moves to the next chord and plans the one after it. With `move`, the
+   * chord after it is never the same chord again when the progression offers
+   * another (loops use this, so every chord change is heard).
+   */
+  advance(inputs: Readonly<HarmonyInputs>, nextStartsPhrase: boolean, move = false): void {
     if (this.form) {
       const length = this.form.sequence.length;
       this.formIndex = (this.formIndex + 1) % length;
@@ -185,7 +212,7 @@ export class Harmony {
       return;
     }
     this.chord = { ...this.next, size: this.sizeFor(inputs) };
-    this.next = this.chooseNext(this.chord, inputs, nextStartsPhrase);
+    this.next = this.chooseNext(this.chord, inputs, nextStartsPhrase, move);
   }
 
   private formsFor(genes: HarmonyGenes): ChordForm[] {
@@ -232,12 +259,25 @@ export class Harmony {
     this.next = { degree: 0, size: this.chord.size };
   }
 
-  private chooseNext(from: Chord, inputs: Readonly<HarmonyInputs>, startsPhrase: boolean): Chord {
+  private chooseNext(
+    from: Chord,
+    inputs: Readonly<HarmonyInputs>,
+    startsPhrase: boolean,
+    move = false,
+  ): Chord {
     const size = this.sizeFor(inputs);
     // Phrases tend to start at home when tension is low.
-    if (startsPhrase && this.rng.chance((1 - inputs.tension) * 0.6)) return { degree: 0, size };
+    if (
+      startsPhrase &&
+      this.rng.chance((1 - inputs.tension) * 0.6) &&
+      !(move && from.degree === 0)
+    ) {
+      return { degree: 0, size };
+    }
     const row = this.palette.progression[from.degree] ?? { 0: 1 };
-    const degrees = Object.keys(row).map(Number);
+    const all = Object.keys(row).map(Number);
+    const others = all.filter((d) => d !== from.degree && (row[d] ?? 0) > 0);
+    const degrees = move && others.length > 0 ? others : all;
     const weights = degrees.map((d) => {
       const w = (row[d] ?? 0) * (this.bias[d] ?? 1);
       // Tension above 0.5 favors unstable chords, below 0.5 favors stable ones.

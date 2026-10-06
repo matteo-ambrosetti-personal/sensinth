@@ -140,8 +140,10 @@ final class MotionHelper {
         if tag == "a" {
             let g = (x * x + y * y + z * z).squareRoot()
             emit("mac.shake", abs(g - 1) * 9.81)
+            // Tilt angles within ±90° whatever the sign of gravity on this Mac's axes:
+            // atan2(y, z) would jump around ±180° on a Mac lying flat with z ≈ −1 g.
             emit("mac.pitch", atan2(-x, (y * y + z * z).squareRoot()) * 180 / .pi)
-            emit("mac.roll", atan2(y, z) * 180 / .pi)
+            emit("mac.roll", atan2(y, (x * x + z * z).squareRoot()) * 180 / .pi)
         } else if tag == "g" {
             emit("mac.rotation", (x * x + y * y + z * z).squareRoot())
         }

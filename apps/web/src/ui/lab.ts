@@ -198,7 +198,7 @@ export const SOURCE_NAMES: Record<string, string> = {
   clock: 'Clock',
   sim: 'Simulated',
   replay: 'Replay',
-  computer: 'Pointer & keys',
+  computer: 'Pointer & keyboard',
   native: 'Phone (native)',
   mac: 'Mac',
   controller: 'Game controllers',

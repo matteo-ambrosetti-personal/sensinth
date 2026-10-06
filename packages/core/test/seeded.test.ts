@@ -1,22 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   Engine,
+  KEY_EFFECTS,
+  LOOP_BARS,
   ReplaySource,
   STEPS_PER_BAR,
-  Scale,
+  STYLES,
   SensorHub,
   SensorRecorder,
-  SimulatedSource,
-  STYLES,
-  absoluteScale,
   chiptune,
-  eventPitch,
-  keyIndex,
+  keyCodeIndex,
+  keyEffect,
   lofi,
-  pressRate,
   stepDuration,
   techno,
-  type EventNote,
+  zoneOf,
+  type DeterministicOptions,
   type NoteEvent,
   type SensorDescriptor,
   type SensorEvent,
@@ -29,323 +28,340 @@ const KEYS: SensorDescriptor = {
   kind: 'keys.rate',
   label: 'Typing',
   range: [0, 15],
-  adaptive: true,
-  minSpan: 3,
   rateHz: 30,
 };
+const TILT: SensorDescriptor = {
+  id: 'mac.pitch',
+  kind: 'orientation.pitch',
+  label: 'Tilt forward–back',
+  range: [-90, 90],
+  rateHz: 50,
+};
 const LIGHT: SensorDescriptor = {
-  id: 'phone.light',
+  id: 'mac.light',
   kind: 'light',
   label: 'Light',
-  unit: 'lx',
   range: [0, 10000],
   adaptive: true,
   minSpan: 30,
-  rateHz: 10,
-};
-const SHAKE: SensorDescriptor = {
-  id: 'phone.accel',
-  kind: 'motion.accel',
-  label: 'Shake',
-  range: [0, 40],
-  adaptive: true,
-  minSpan: 0.4,
-  rateHz: 50,
+  rateHz: 2,
 };
 
-/** What a test session does: readings over time, and presses. */
+/** A key pressed at a time. */
+const key = (code: string, t: number): SensorEvent => ({
+  id: KEYS.id,
+  t,
+  kind: 'key',
+  value: keyCodeIndex(code),
+  velocity: 0.8,
+});
+
 interface Script {
-  descriptors: readonly SensorDescriptor[];
-  sampleAt?(t: number): SensorSample[];
-  /** Presses, in time order. */
-  events?: readonly SensorEvent[];
-}
-
-/** The letter `key` pressed every `interval` seconds from `start`, up to `until`. */
-function typing(key: string, interval: number, until: number, start = 0.5): SensorEvent[] {
-  const out: SensorEvent[] = [];
-  for (let t = start; t < until; t += interval) {
-    out.push({ id: KEYS.id, t, kind: 'key', value: keyIndex(key), velocity: 0.8 });
-  }
-  return out;
-}
-
-/** A steady light reading, sampled 10 times a second. */
-function light(lux: number) {
-  return (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: lux }];
+  descriptors?: readonly SensorDescriptor[];
+  /** Readings at a time (called every 0.05 s). */
+  sampleAt?: (t: number) => SensorSample[];
+  presses?: readonly SensorEvent[];
+  /** Called after every step with its notes. */
+  onStep?: (events: readonly NoteEvent[], engine: Engine) => void;
 }
 
 interface Take {
   events: NoteEvent[];
-  notes: EventNote[];
-  /** Every track's machine, length and trigs, per bar. */
-  structure: string[];
-  /** Every track's live params, per step. */
-  params: number[][];
-  machines: string[];
+  /** The song version at the start of each bar. */
+  versions: string[];
+  /** The key (pitch class) at the start of each bar. */
+  keys: (number | undefined)[];
+  engine: Engine;
 }
 
 /** Plays a script in deterministic mode, feeding readings and presses in time order. */
-function take(style: Style, bars: number, seed: number, script: Script): Take {
+function take(
+  style: Style,
+  bars: number,
+  opts: Omit<DeterministicOptions, 'origin'>,
+  script: Script = {},
+): Take {
   const hub = new SensorHub();
-  for (const d of script.descriptors) hub.announce(d);
-  const engine = new Engine({ style, hub, deterministic: { seed } });
-  const notes: EventNote[] = [];
-  engine.onEventNotes = (n) => notes.push(...n);
+  for (const d of [KEYS, ...(script.descriptors ?? [])]) hub.announce(d);
+  const engine = new Engine({ style, hub, deterministic: { ...opts, origin: 0 } });
   const dt = stepDuration(style.defaultTempo);
-  const pending = [...(script.events ?? [])];
-  const out: Take = { events: [], notes, structure: [], params: [], machines: [] };
+  const presses = [...(script.presses ?? [])].sort((a, b) => a.t - b.t);
+  const out: Take = { events: [], versions: [], keys: [], engine };
   let sampleT = 0;
   for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
     const t = step * dt;
-    // Readings every 0.1 s and every press, up to the time of this step.
-    for (; sampleT <= t; sampleT = Math.round((sampleT + 0.1) * 1000) / 1000) {
+    for (; sampleT <= t; sampleT = Math.round((sampleT + 0.05) * 1000) / 1000) {
       hub.pushAll(script.sampleAt?.(sampleT) ?? []);
-      while (pending.length > 0 && (pending[0] as SensorEvent).t <= sampleT) {
-        hub.emit(pending.shift() as SensorEvent);
+      while (presses.length > 0 && (presses[0] as SensorEvent).t <= sampleT) {
+        hub.emit(presses.shift() as SensorEvent);
       }
     }
-    out.events.push(...engine.tick(dt));
-    const view = engine.view();
+    const events = engine.tick(dt);
+    script.onStep?.(events, engine);
+    out.events.push(...events);
     if (step % STEPS_PER_BAR === 0) {
-      out.structure.push(
-        JSON.stringify(
-          view.tracks.map((tr) => [tr.machine, tr.length, tr.scale, tr.trigs, tr.base]),
-        ),
-      );
+      out.versions.push(engine.view().song?.version ?? '');
+      out.keys.push(engine.key);
     }
-    out.params.push(view.tracks.flatMap((tr) => Object.values(tr.params)));
-    if (step === 0) out.machines = engine.trackMachines().map((m) => `${m.slot}:${m.machineId}`);
   }
   engine.dispose();
   return out;
 }
 
-const gridKey = (e: NoteEvent) => `${e.part}|${e.step}|${e.midi ?? e.voice}`;
-
-/** Share of grid notes heard in only one of two takes. */
-function gridDifference(a: readonly NoteEvent[], b: readonly NoteEvent[]): number {
-  const sa = new Set(a.map(gridKey));
-  const sb = new Set(b.map(gridKey));
-  let only = 0;
-  for (const k of sa) if (!sb.has(k)) only++;
-  for (const k of sb) if (!sa.has(k)) only++;
-  return only / Math.max(1, sa.size + sb.size);
+/** The notes of bars [from, to), with steps counted from `from`. */
+function bars(events: readonly NoteEvent[], from: number, to: number): string[] {
+  const lo = from * STEPS_PER_BAR;
+  const hi = to * STEPS_PER_BAR;
+  return events
+    .filter((e) => e.step >= lo && e.step < hi)
+    .map((e) => JSON.stringify({ ...e, step: e.step - lo }));
 }
 
-/** Largest difference between two takes' live params, and whether any differ at all. */
-function paramDifference(a: Take, b: Take): number {
-  let max = 0;
-  a.params.forEach((row, i) => {
-    row.forEach((v, j) => {
-      max = Math.max(max, Math.abs(v - ((b.params[i] as number[])[j] ?? v)));
-    });
-  });
-  return max;
-}
+/** Seconds at the middle of a bar. */
+const midBar = (style: Style, bar: number) =>
+  (bar + 0.5) * STEPS_PER_BAR * stepDuration(style.defaultTempo);
 
-const BARS = 32;
-const SECONDS = (BARS * STEPS_PER_BAR * stepDuration(chiptune.defaultTempo)) as number;
-
-describe('Deterministic mode', () => {
-  const script = (interval: number, lux = 250): Script => ({
-    descriptors: [KEYS, LIGHT],
-    sampleAt: light(lux),
-    events: typing('a', interval, SECONDS),
-  });
-
-  it('plays the same music for the same seed and the same typing', () => {
-    const a = take(chiptune, BARS, 42, script(0.25));
-    const b = take(chiptune, BARS, 42, script(0.25));
-    expect(a.events.length).toBeGreaterThan(200);
-    expect(a.notes.length).toBeGreaterThan(100);
-    expect(b.events).toEqual(a.events);
-    expect(b.notes).toEqual(a.notes);
-  });
-
-  it('plays without any sensor, starting on the first step', () => {
-    const quiet = take(chiptune, 2, 42, { descriptors: [] });
-    expect(quiet.events.filter((e) => e.step < STEPS_PER_BAR).length).toBeGreaterThan(0);
-  });
-
-  it('lets the seed pick the tracks', () => {
-    const seeds = [1, 2, 3, 4, 5, 6].map((s) => take(techno, 1, s, { descriptors: [] }));
-    expect(new Set(seeds.map((t) => t.machines.join())).size).toBeGreaterThan(1);
-    expect(new Set(seeds.map((t) => t.structure[0])).size).toBe(seeds.length);
-  });
-
-  it('writes the same tracks and patterns whatever the inputs do', () => {
-    const quiet = take(lofi, BARS, 42, { descriptors: [] });
-    const busy = take(lofi, BARS, 42, script(0.18, 900));
-    const sim = new SimulatedSource(3);
-    const simulated = take(lofi, BARS, 42, {
-      descriptors: sim.descriptors,
-      sampleAt: (t) => sim.sampleAt(t),
-    });
-    expect(busy.machines).toEqual(quiet.machines);
-    expect(busy.structure).toEqual(quiet.structure);
-    expect(simulated.structure).toEqual(quiet.structure);
-    // Sections still differ from one another.
-    const bars = lofi.palette.sectionBars;
-    expect(quiet.structure[bars]).not.toEqual(quiet.structure[0]);
-  });
-
-  it('answers typing 2% slower with music a little off, not different music', () => {
-    const steady = take(chiptune, BARS, 42, script(0.25));
-    const slower = take(chiptune, BARS, 42, script(0.255));
-    // Each press plays at its own time, with the same note for the same letter.
-    const n = Math.min(steady.notes.length, slower.notes.length);
-    expect(n).toBeGreaterThan(100);
-    let samePitch = 0;
-    for (let i = 0; i < n; i++) {
-      const a = steady.notes[i] as EventNote;
-      const b = slower.notes[i] as EventNote;
-      expect(b.time - a.time).toBeCloseTo(i * 0.005, 6);
-      if (a.note.midi === b.note.midi) samePitch++;
-    }
-    expect(samePitch / n).toBeGreaterThan(0.9);
-    // The grid barely moves, the params move a little, and not at all would be wrong too.
-    expect(gridDifference(steady.events, slower.events)).toBeLessThan(0.1);
-    const params = paramDifference(steady, slower);
-    expect(params).toBeGreaterThan(0);
-    expect(params).toBeLessThan(0.08);
-  });
-
-  it('answers 2% more light with params a little off', () => {
-    const a = take(chiptune, BARS, 42, script(0.25, 250));
-    const b = take(chiptune, BARS, 42, script(0.25, 255));
-    const params = paramDifference(a, b);
-    expect(params).toBeGreaterThan(0);
-    expect(params).toBeLessThan(0.05);
-    expect(gridDifference(a.events, b.events)).toBeLessThan(0.1);
-  });
-
-  it('moves a destination monotonically as a reading rises', () => {
-    const values = [200, 220, 240, 260, 280, 300].map((lux) => {
-      const t = take(chiptune, 2, 7, { descriptors: [LIGHT], sampleAt: light(lux) });
-      return t.params[24] as number[];
-    });
-    const first = values[0] as number[];
-    const moving = first.map((_, j) => values.map((row) => row[j] as number));
-    const changed = moving.filter((col) => col.some((v) => v !== col[0]));
-    expect(changed.length).toBeGreaterThan(0);
-    for (const col of changed) {
-      const diffs = col.slice(1).map((v, i) => v - (col[i] as number));
-      const up = diffs.every((d) => d >= -1e-12);
-      const down = diffs.every((d) => d <= 1e-12);
-      expect(up || down).toBe(true);
-    }
-  });
-
-  it('plays a hit at the exact time of each shake', () => {
-    const shakes = [1.0, 2.5, 4.0];
-    const shaking = (t: number): SensorSample[] => {
-      const out: SensorSample[] = [];
-      // 50 readings a second, a jolt at each shake time.
-      for (let k = 0; k < 5; k++) {
-        const ts = Math.round((t - 0.08 + k * 0.02) * 1000) / 1000;
-        if (ts < 0 || ts > t) continue;
-        const jolt = shakes.some((s) => Math.abs(ts - s) < 0.001);
-        out.push({ id: SHAKE.id, t: ts, v: jolt ? 15 : 0.2 });
+describe('Deterministic songs', () => {
+  it('loop exactly while nothing changes, in every style and loop length', () => {
+    for (const style of STYLES) {
+      for (const loopBars of [2, 8]) {
+        const t = take(style, loopBars * 3, { seed: 42, loopBars });
+        const first = bars(t.events, 0, loopBars);
+        expect(first.length, `${style.id} ${loopBars}`).toBeGreaterThan(5);
+        expect(bars(t.events, loopBars, 2 * loopBars), `${style.id} ${loopBars}`).toEqual(first);
+        expect(bars(t.events, 2 * loopBars, 3 * loopBars), `${style.id} ${loopBars}`).toEqual(
+          first,
+        );
       }
-      return out;
+    }
+  });
+
+  it('play from the first step with no sensor, the same every time', () => {
+    const a = take(lofi, 4, { seed: 7, loopBars: 4 });
+    const b = take(lofi, 4, { seed: 7, loopBars: 4 });
+    expect(a.events.filter((e) => e.step < STEPS_PER_BAR).length).toBeGreaterThan(0);
+    expect(b.events).toEqual(a.events);
+    expect(a.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('let the seed pick the song', () => {
+    const songs = [1, 2, 3, 4].map((seed) =>
+      bars(take(techno, 2, { seed, loopBars: 2 }).events, 0, 2),
+    );
+    expect(new Set(songs.map((s) => s.join())).size).toBe(songs.length);
+  });
+
+  it('turn into a new song at the bar after a press, which then loops', () => {
+    const loopBars = 4;
+    const base = take(chiptune, 16, { seed: 42, loopBars });
+    const edited = take(
+      chiptune,
+      16,
+      { seed: 42, loopBars },
+      { presses: [key('KeyQ', midBar(chiptune, 1))] },
+    );
+    // Unchanged until the press is read, at the start of bar 2.
+    expect(bars(edited.events, 0, 2)).toEqual(bars(base.events, 0, 2));
+    expect(edited.versions[1]).toBe('base');
+    expect(edited.versions[2]).not.toBe('base');
+    expect(bars(edited.events, 2, 4)).not.toEqual(bars(base.events, 2, 4));
+    // From then on the new song loops exactly.
+    expect(bars(edited.events, 8, 12)).toEqual(bars(edited.events, 4, 8));
+    expect(bars(edited.events, 12, 16)).toEqual(bars(edited.events, 4, 8));
+  });
+
+  it('sound the same at the same point of the loop whenever the press came', () => {
+    const loopBars = 4;
+    const early = take(
+      lofi,
+      12,
+      { seed: 3, loopBars },
+      { presses: [key('KeyA', midBar(lofi, 0))] },
+    );
+    const late = take(lofi, 12, { seed: 3, loopBars }, { presses: [key('KeyA', midBar(lofi, 2))] });
+    expect(late.versions[8]).toBe(early.versions[8]);
+    expect(bars(late.events, 8, 12)).toEqual(bars(early.events, 8, 12));
+    // Already in the bar after the late press, mid-loop.
+    expect(bars(late.events, 3, 4)).toEqual(bars(early.events, 3, 4));
+  });
+
+  it('toggle: a second press undoes the first, and order does not matter', () => {
+    const o = { seed: 42, loopBars: 4, repeat: 'toggle' } as const;
+    const base = take(chiptune, 12, o);
+    const twice = take(chiptune, 12, o, {
+      presses: [key('KeyA', midBar(chiptune, 1)), key('KeyA', midBar(chiptune, 4))],
+    });
+    expect(twice.versions[3]).not.toBe('base');
+    expect(twice.versions[8]).toBe('base');
+    expect(bars(twice.events, 8, 12)).toEqual(bars(base.events, 8, 12));
+    const as = take(chiptune, 8, o, {
+      presses: [key('KeyA', midBar(chiptune, 0)), key('KeyO', midBar(chiptune, 1))],
+    });
+    const sa = take(chiptune, 8, o, {
+      presses: [key('KeyO', midBar(chiptune, 0)), key('KeyA', midBar(chiptune, 1))],
+    });
+    expect(sa.versions[4]).toBe(as.versions[4]);
+    expect(bars(sa.events, 4, 8)).toEqual(bars(as.events, 4, 8));
+  });
+
+  it('accumulate: every press moves the song on', () => {
+    const o = { seed: 42, loopBars: 4, repeat: 'accumulate' } as const;
+    const presses = [1, 2, 3].map((b) => key('KeyO', midBar(chiptune, b)));
+    const t = take(chiptune, 6, o, { presses });
+    const [v1, v2, v3] = [t.versions[2], t.versions[3], t.versions[4]];
+    expect(new Set(['base', v1, v2, v3]).size).toBe(4);
+    // O moves the key up a fifth each time.
+    const k0 = t.keys[0] as number;
+    expect(t.keys[2]).toBe((k0 + 7) % 12);
+    expect(t.keys[3]).toBe((k0 + 14) % 12);
+  });
+
+  it('once: only the first press counts', () => {
+    const o = { seed: 42, loopBars: 4, repeat: 'once' } as const;
+    const one = take(chiptune, 8, o, { presses: [key('KeyR', midBar(chiptune, 0))] });
+    const three = take(chiptune, 8, o, {
+      presses: [0, 1, 2].map((b) => key('KeyR', midBar(chiptune, b))),
+    });
+    expect(three.versions[4]).toBe(one.versions[4]);
+    expect(bars(three.events, 4, 8)).toEqual(bars(one.events, 4, 8));
+  });
+
+  it('give every key one fixed effect, whatever the seed', () => {
+    expect(keyEffect(keyCodeIndex('KeyO'))).toEqual(KEY_EFFECTS.KeyO);
+    expect(keyEffect(keyCodeIndex('KeyA'))).toEqual({ id: 'rotate', target: 1, dir: 1 });
+    // Any other key still has one, always the same.
+    expect(keyEffect(keyCodeIndex('F13'))).toEqual(keyEffect(keyCodeIndex('F13')));
+    for (const seed of [1, 99, 12345]) {
+      const t = take(lofi, 4, { seed, loopBars: 2 }, { presses: [key('KeyO', midBar(lofi, 0))] });
+      expect(t.keys[2]).toBe(((t.keys[0] as number) + 7) % 12);
+      expect(t.engine.view().song?.edits.map((e) => e.effect.id)).toEqual(['fifth']);
+    }
+  });
+
+  it('read continuous sensors in zones: noise changes nothing, coming back restores the song', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
+    const dt = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    // Flat with a little noise, tilted forward for bars 4–7, then flat again.
+    const tilt = (t: number): SensorSample[] => {
+      const bar = t / dt;
+      const angle = bar >= 4 && bar < 8 ? 60 : 3 * Math.sin(t * 7);
+      return [{ id: TILT.id, t, v: angle }];
     };
-    const run = take(techno, 4, 9, { descriptors: [SHAKE], sampleAt: shaking });
-    const hits = run.notes.filter((n) => n.note.part === 'hit');
-    expect(hits.map((h) => h.time)).toEqual(shakes);
+    const base = take(chiptune, 16, o);
+    const tilted = take(chiptune, 16, o, { descriptors: [TILT], sampleAt: tilt });
+    expect(tilted.versions.slice(0, 5).every((v) => v === 'base')).toBe(true);
+    expect(tilted.versions[5]).not.toBe('base');
+    expect(tilted.keys[5]).toBe(((tilted.keys[0] as number) + 14) % 12);
+    expect(tilted.versions[12]).toBe('base');
+    expect(bars(tilted.events, 12, 16)).toEqual(bars(base.events, 12, 16));
+  });
+
+  it('combine a sensor and a key, whatever came first', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
+    const bright = (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: 3000 }];
+    const keyThenLight = take(chiptune, 8, o, {
+      descriptors: [LIGHT],
+      sampleAt: (t) => (t > midBar(chiptune, 1) ? bright(t) : [{ id: LIGHT.id, t, v: 0 }]),
+      presses: [key('KeyW', midBar(chiptune, 0))],
+    });
+    const lightThenKey = take(chiptune, 8, o, {
+      descriptors: [LIGHT],
+      sampleAt: bright,
+      presses: [key('KeyW', midBar(chiptune, 1))],
+    });
+    const lightOnly = take(chiptune, 8, o, { descriptors: [LIGHT], sampleAt: bright });
+    const keyOnly = take(chiptune, 8, o, { presses: [key('KeyW', midBar(chiptune, 0))] });
+    const both = keyThenLight.versions[4];
+    expect(lightThenKey.versions[4]).toBe(both);
+    expect(new Set([both, lightOnly.versions[4], keyOnly.versions[4], 'base']).size).toBe(4);
+    expect(bars(lightThenKey.events, 4, 8)).toEqual(bars(keyThenLight.events, 4, 8));
+  });
+
+  it('count steps along the way in steps mode', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'steps', repeat: 'accumulate' } as const;
+    const dt = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    const tilt = (t: number): SensorSample[] => {
+      const bar = t / dt;
+      return [{ id: TILT.id, t, v: bar >= 2 && bar < 4 ? 60 : 0 }];
+    };
+    const t = take(chiptune, 8, o, { descriptors: [TILT], sampleAt: tilt });
+    // Two zones up, then two back down: four steps, not back where it started.
+    expect(t.versions[1]).toBe('base');
+    expect(t.versions[3]).not.toBe('base');
+    expect(t.versions[6]).not.toBe('base');
+    expect(t.versions[6]).not.toBe(t.versions[3]);
+    expect(t.engine.view().song?.edits[0]?.count).toBe(4);
+  });
+
+  it('keep every note in the scale, whatever is pressed', () => {
+    // Every key but the mutes, which would silence everything.
+    const codes = Object.keys(KEY_EFFECTS).filter((c) => KEY_EFFECTS[c]?.id !== 'mute');
+    for (const style of STYLES) {
+      const presses = codes.map((c, i) => key(c, 0.3 + i * 0.37));
+      const outside: string[] = [];
+      const t = take(
+        style,
+        24,
+        { seed: 5, loopBars: 8, repeat: 'accumulate' },
+        {
+          presses,
+          onStep: (events, engine) => {
+            const scale = engine.scale;
+            for (const e of events) {
+              if (e.midi === undefined || !scale || scale.contains(e.midi)) continue;
+              // Blue notes: a lead may bend to the key's ♭3 or ♭5 on a weak step.
+              const rel = (((e.midi - (engine.key ?? 0)) % 12) + 12) % 12;
+              if (e.role === 'lead' && e.step % 2 === 1 && (rel === 3 || rel === 6)) continue;
+              outside.push(`${e.part}@${e.step}:${e.midi}`);
+            }
+          },
+        },
+      );
+      expect(t.events.length, style.id).toBeGreaterThan(50);
+      expect(outside, style.id).toEqual([]);
+      for (const e of t.events) {
+        expect(Number.isFinite(e.vel) && e.vel > 0 && e.vel <= 1, style.id).toBe(true);
+        expect(e.durSteps, style.id).toBeGreaterThan(0);
+      }
+    }
   });
 
   it('replays a recording with presses to the identical piece', () => {
     const hub = new SensorHub();
     hub.announce(KEYS);
-    hub.announce(LIGHT);
+    hub.announce(TILT);
     const recorder = new SensorRecorder();
     recorder.start(hub);
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       const t = i * 0.1;
-      hub.push({ id: LIGHT.id, t, v: 250 + i });
-      if (i % 3 === 0) hub.emit({ id: KEYS.id, t, kind: 'key', value: i % 7, velocity: 0.8 });
+      hub.push({ id: TILT.id, t, v: i < 30 ? 0 : 50 });
+      if (i % 10 === 5) hub.emit(key(i % 20 === 5 ? 'KeyA' : 'KeyO', t));
     }
     const rec = recorder.stop();
-    expect(rec.events?.length).toBe(14);
+    expect(rec.events?.length).toBe(6);
     const replayed = () => {
-      const replay = new ReplaySource(rec, { loop: false });
-      return take(chiptune, 4, 42, {
-        descriptors: replay.descriptors,
-        sampleAt: (t) => replay.samplesUntil(t),
-        events: new ReplaySource(rec, { loop: false }).eventsUntil(10),
-      });
+      const replay = new ReplaySource(rec, { loop: false, idPrefix: '' });
+      return take(
+        chiptune,
+        8,
+        { seed: 9, loopBars: 4 },
+        {
+          descriptors: replay.descriptors,
+          sampleAt: (t) => replay.samplesUntil(t),
+          presses: new ReplaySource(rec, { loop: false, idPrefix: '' }).eventsUntil(100),
+        },
+      );
     };
     const a = replayed();
     const b = replayed();
-    expect(a.notes.length).toBe(14);
+    expect(a.versions[7]).not.toBe('base');
     expect(b.events).toEqual(a.events);
-    expect(b.notes).toEqual(a.notes);
   });
 
-  it('keeps every grid note in its scale for every style', () => {
-    for (const style of STYLES) {
-      const run = take(style, 8, 42, script(0.3));
-      expect(run.events.length).toBeGreaterThan(0);
-      expect(run.notes.every((n) => n.note.midi !== undefined || n.note.voice)).toBe(true);
-    }
-  });
-});
-
-describe('Deterministic inputs', () => {
-  it('turns press times into a rate that moves in proportion', () => {
-    const presses = (interval: number) => Array.from({ length: 40 }, (_, i) => i * interval);
-    const at = (interval: number) => pressRate(presses(interval), 39 * interval + 0.01);
-    expect(at(0.25)).toBeGreaterThan(3.5);
-    expect(at(0.255) / at(0.25)).toBeGreaterThan(0.96);
-    expect(at(0.255) / at(0.25)).toBeLessThan(0.995);
-  });
-
-  it('reads every channel on a fixed, monotonic scale', () => {
-    const descs: SensorDescriptor[] = [
-      LIGHT,
-      SHAKE,
-      { id: 'tilt', kind: 'orientation.pitch', label: '', range: [-90, 90] },
-      { id: 'temp', kind: 'temperature.device', label: '', minSpan: 3 },
-      { id: 'lid', kind: 'lid.angle', label: '', range: [0, 180], adaptive: true, minSpan: 20 },
-    ];
-    for (const d of descs) {
-      const scale = absoluteScale(d, 40);
-      const lo = d.range?.[0] ?? 0;
-      const hi = d.range?.[1] ?? 80;
-      let prev = -Infinity;
-      for (let i = 0; i <= 100; i++) {
-        const v = scale(lo + ((hi - lo) * i) / 100);
-        expect(v).toBeGreaterThanOrEqual(prev);
-        expect(v).toBeGreaterThanOrEqual(0);
-        expect(v).toBeLessThanOrEqual(1);
-        prev = v;
-      }
-    }
-    // Light is read on a log scale: a room and daylight both land mid-range.
-    const lux = absoluteScale(LIGHT, 0);
-    expect(lux(250)).toBeGreaterThan(0.3);
-    expect(lux(5000)).toBeLessThan(0.95);
-  });
-
-  it('gives every letter its own note, the same within a harmony', () => {
-    const scale = new Scale(0, 'ionian');
-    const chord = { degree: 0, size: 3 };
-    const key = (k: string): SensorEvent => ({
-      id: KEYS.id,
-      t: 0,
-      kind: 'key',
-      value: keyIndex(k),
-      velocity: 1,
-    });
-    const range: [number, number] = [60, 96];
-    expect(eventPitch(key('a'), scale, chord, range)).toBe(60);
-    expect(eventPitch(key('b'), scale, chord, range)).toBe(62);
-    expect(eventPitch(key('h'), scale, chord, range)).toBe(72);
-    expect(eventPitch(key('A'), scale, chord, range)).toBe(60);
-    expect(eventPitch(key('a'), new Scale(2, 'dorian'), chord, range)).toBe(62);
-    // A MIDI key keeps its pitch, moved into the scale.
-    const note: SensorEvent = { id: 'm', t: 0, kind: 'note', value: 61, velocity: 1 };
-    expect(eventPitch(note, scale, chord, range)).toBe(60);
+  it('offers the loop lengths and keeps zones steady near an edge', () => {
+    expect(LOOP_BARS).toEqual([2, 4, 8, 12, 16]);
+    expect(zoneOf(0.41, undefined)).toBe(2);
+    expect(zoneOf(0.385, 2)).toBe(2);
+    expect(zoneOf(0.35, 2)).toBe(1);
   });
 });

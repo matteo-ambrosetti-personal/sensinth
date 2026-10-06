@@ -9,7 +9,7 @@ It runs on an Android phone (as an app or in Chrome) and on a Mac (as an app or 
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.9. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+**Status:** Phase 3.10. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
 Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
 **Free** has no style at all: the sensors also pick the instruments, from every style. It plays
 like a Digitakt driven by your surroundings: tracks with their own lengths, trig
@@ -29,8 +29,8 @@ controllers and MIDI controllers, and in Chrome the MacBook lid and CPU pressure
 the routes it takes to the tracks, and how the tracks are mixed and sent through the effects to
 the speakers; tap a sensor to light up everything it moves. The **Sensor lab** shows one sensor at
 a time, raw and processed. Switch on **Deterministic** and set a **seed** for the opposite
-promise: the seed writes the tracks, and the same gestures at the same times play the same
-music, while gestures a little off play music a little off. See
+promise: the seed writes a song that loops until you change something, and every key and sensor
+changes it its own way, the same way every time. See
 [docs/roadmap.md](docs/roadmap.md).
 
 ## Get it
@@ -89,10 +89,11 @@ Open the hosted app (GitHub Pages, below) in Chrome or Safari and install it:
   _Install page as app_.
 - **Safari (macOS Sonoma or later):** _File_ → _Add to Dock_.
 
-It then opens in its own window from the Dock and works offline. On a laptop the **Pointer & keys**
-source is on by default: moving the pointer (or scrolling) raises the energy, its height sets the
-melody's register, left–right the timbre, and typing adds accents; a Force Touch press (Safari) or
-a pen's pressure accents too. The microphone, camera and location work too, and:
+It then opens in its own window from the Dock and works offline. On a laptop the **Pointer** and
+**Keyboard** sources are on by default: moving the pointer (or scrolling) raises the energy, its
+height sets the melody's register, left–right the timbre, and typing adds accents; a Force Touch
+press (Safari) or a pen's pressure accents too. A browser can't read a Mac's tilt (the motion
+sensor needs administrator rights): the Mac app can, with **Mac motion**. The microphone, camera and location work too, and:
 
 - **MacBook lid** (Chrome or Edge): pick the lid sensor once when asked; it reconnects after that.
 - **CPU pressure** (Chrome or Edge): a busy computer makes busier music.
@@ -139,33 +140,35 @@ Sensors → signal processing → ───────┼─► phrase mutation
    throw, bit crush, gate chop, ring mod) fire on sensor events, at structural moments and from
    the FX lane, one at a time.
 
-### Deterministic mode
+### Deterministic mode: a song your inputs edit
 
 Switch on **Deterministic** in the Style panel and pick a **seed** (42 by default). It works with
 every style and takes effect at the next Play.
 
-- **The seed writes the tracks.** Machines and track count come from the seed and the style;
-  every section's patterns, routings and harmony settings from the seed and the section number.
-  The same seed always plays the same sequence of sections, whatever the sensors do. It plays
-  with no sensor at all.
-- **Every input has a fixed, proportional effect.** Readings go through fixed curves instead of
-  learned ranges, and only move things that answer smoothly: track parameters, trig
-  probabilities against fixed rolls, swing, tension, brightness, space. Nothing is hashed, so a
-  reading 2% higher pushes the music a little further, never somewhere else.
-- **Presses play their own notes, when you press.** Every key you type plays a note on the
-  seed's melodic voice about 60 ms later: the letter picks the scale degree (a is the root, b the
-  second…), so the same letter always gives the same note in the same harmony. MIDI keys keep
-  their pitch (moved into the scale), controller buttons pick degrees, and onsets of fast
-  sensors (a shake, a clap, a cover closing) hit the seed's percussion voice.
-- **Timing is read on the music's clock.** The rate of presses comes from a smooth kernel over
-  their exact times, so typing 2% slower reads about 2% slower, and every input is read 0.2 s
-  behind the music from a log of what it did, so when a timer fires never matters.
+- **The seed writes a song that loops.** With no input changing, the same loop plays forever
+  (choose 2, 4, 8, 12 or 16 bars). It plays with no sensor at all.
+- **Every input has one fixed effect.** Each key does its own thing, always the same: `1`–`8`
+  mute tracks, `Q`–`I` rewrite them, `A`–`K` rotate them, `Z`–`,` move them up an octave; `O`
+  moves the key up a fifth, `P` changes the mode, `L` the chords, `[` `]` half and double time,
+  `\` takes the drums out, Space fills them, Enter adds a track (the full list is under **What
+  each key does** in the Song panel). MIDI keys and controller buttons pick from the same
+  effects, and onsets of fast sensors have their own (a shake rewrites the drums, a clap fills
+  them). Continuous sensors have one each too: tilt moves the key, roll the mode, light the
+  brightness, the lid the number of tracks, the pointer the drums and the melody.
+- **A change makes a new song from the next bar**, which then loops in turn. Several changes
+  combine, and the result never depends on the order they came in. The loop keeps its place, and
+  the music at any moment depends only on the changes and the position in the loop.
+- **You choose how inputs count.** _Same key again_: **toggles** (pressing again undoes it), **adds
+  up** (every press applies it once more) or **counts once**. _Sensors_: **zones** (each sensor's
+  range is split into five zones; coming back to a zone brings back its song) or **steps** (every
+  zone crossed counts as a press).
+- **The Song panel** lists every change in effect (which input, what it does, how many times),
+  and the card under the scope shows the loop position and the song's version.
 
-With seed 42 and an "a" every 250 ms you hear the same piece every time; at 255 ms the notes you
-type land 5 ms later each time and the rest moves by a hair (in the tests, about 0.1% of grid
-notes and under 1% of loudness). Recordings keep key presses too, and a replay starts over at
-Play, so a recording plays the identical piece. Two takes by hand are never identical to the
-millisecond, and the **Clock** source (time of day) keeps moving: turn it off for repeats.
+Inputs are read 0.2 s behind the music from a log of what they did, so when a timer fires never
+matters. Recordings keep key presses, and a replay starts over at Play, so a recording plays the
+identical song. In zones mode, sensors that drift (CPU load, Wi-Fi, the time of day) change the
+song when they cross a zone: turn those sources off for a still loop.
 
 Details: [docs/architecture.md](docs/architecture.md).
 

@@ -1,6 +1,7 @@
 import {
-  Rng,
   clamp,
+  hashInts,
+  hashString,
   expLerp,
   lerp,
   neutralParams,
@@ -25,6 +26,15 @@ import type { Instrument } from './instruments/types';
 import { createCrackleBuffer, createNoiseBuffer } from './noise';
 import { cutoffHz, levelGain, panValue, resonanceQ, sendGain } from './params';
 import { WaveTable } from './waves';
+
+/**
+ * A note's timing offset for humanizing, 0..1, from what the note is rather
+ * than from a running generator: the same note on the same step of a loop
+ * (768 steps cover every loop length) always lands the same way.
+ */
+function humanizeOf(ev: NoteEvent): number {
+  return hashInts(hashString(ev.part), ev.step % 768, ev.midi ?? 0, 0x4a) / 2 ** 32;
+}
 
 /** What the renderer follows every step. */
 export interface RenderState {
@@ -116,7 +126,6 @@ export class Renderer {
   private readonly wobbleDrift: GainNode;
   private readonly wobbleFlutter: GainNode;
   private readonly crackle: GainNode;
-  private readonly jitter = new Rng(17);
   readonly output: GainNode;
 
   constructor(
@@ -350,7 +359,7 @@ export class Renderer {
       if (!chain) continue;
       let time =
         gridTime + swingOffset(ev.step, this.swing, stepSeconds) + (ev.micro ?? 0) * stepSeconds;
-      if (humanize > 0) time += ((this.jitter.next() * 2 - 1) * humanize) / 1000;
+      if (humanize > 0) time += ((humanizeOf(ev) * 2 - 1) * humanize) / 1000;
       const params = ev.params ?? chain.params;
       const duration = ev.durSteps * stepSeconds;
       const r = ev.retrig;
@@ -366,18 +375,6 @@ export class Renderer {
         chain.instrument.play(hit, at, Math.min(duration, gap), params);
       }
     }
-  }
-
-  /**
-   * Plays one note at an exact audio time, off the grid: the note of a press
-   * or an onset in deterministic mode. No swing, micro timing or humanizing,
-   * so its timing is exactly the event's.
-   */
-  playAt(ev: NoteEvent, time: number, stepSeconds = this.stepSeconds): void {
-    const chain = this.tracks.get(ev.part);
-    if (!chain) return;
-    const at = Math.max(time, this.ctx.currentTime);
-    chain.instrument.play(ev, at, ev.durSteps * stepSeconds, ev.params ?? chain.params);
   }
 
   /** Fades out and disconnects everything. */

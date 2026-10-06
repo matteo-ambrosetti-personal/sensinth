@@ -1,5 +1,12 @@
 import { renderOffline, type RenderStats } from '@sensinth/audio';
-import { FX_IDS, STYLES, getStyle, type FxId } from '@sensinth/core';
+import {
+  FX_IDS,
+  STYLES,
+  getStyle,
+  type FxId,
+  type RepeatMode,
+  type SensorMode,
+} from '@sensinth/core';
 
 export interface RenderTestOptions {
   bpm?: number;
@@ -9,10 +16,13 @@ export interface RenderTestOptions {
   none?: boolean;
   /** Fire this effect every other bar. */
   fx?: FxId;
-  /** Deterministic mode with this seed (no sensors unless `keys`). */
+  /** Deterministic mode with this seed (no sensors; presses from `keys`). */
   seed?: number;
-  /** A key pressed every `interval` seconds. */
-  keys?: { key: string; interval: number };
+  loopBars?: number;
+  repeat?: RepeatMode;
+  sensors?: SensorMode;
+  /** Keys pressed at given times: `KeyboardEvent.code` and seconds from the start. */
+  keys?: { code: string; at: number }[];
 }
 
 declare global {
@@ -32,7 +42,7 @@ window.sensinthEffects = [...FX_IDS];
 window.sensinthRender = async (styleId, bars, opts = {}) => {
   const style = getStyle(styleId);
   if (!style) throw new Error(`Unknown style ${styleId}`);
-  const { only, none, bpm, fx, seed, keys } = opts;
+  const { only, none, bpm, fx, seed, keys, loopBars, repeat, sensors } = opts;
   const mute = none ? () => true : only ? (slot: string) => slot !== only : undefined;
   const { stats } = await renderOffline({
     style,
@@ -40,7 +50,16 @@ window.sensinthRender = async (styleId, bars, opts = {}) => {
     ...(bpm ? { bpm } : {}),
     ...(mute ? { mute } : {}),
     ...(fx ? { forceFx: fx } : {}),
-    ...(seed !== undefined ? { deterministic: { seed } } : {}),
+    ...(seed !== undefined
+      ? {
+          deterministic: {
+            seed,
+            ...(loopBars ? { loopBars } : {}),
+            ...(repeat ? { repeat } : {}),
+            ...(sensors ? { sensors } : {}),
+          },
+        }
+      : {}),
     ...(keys ? { keys } : {}),
   });
   return stats;

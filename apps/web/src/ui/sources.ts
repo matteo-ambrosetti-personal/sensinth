@@ -48,6 +48,16 @@ export class SourcesView {
         text.append(msg);
       }
       li.append(label, text);
+      const help = state.status === 'unsupported' ? source.helpLink?.() : undefined;
+      if (help) {
+        const a = document.createElement('a');
+        a.className = 'source-link';
+        a.href = help.href;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.textContent = help.label;
+        text.append(a);
+      }
       if (source.preview && state.status === 'on') li.append(source.preview);
       this.list.append(li);
     }
