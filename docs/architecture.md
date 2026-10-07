@@ -65,6 +65,40 @@ the key).
   suitable macro, so a new sensor joins with no code change.
 - Each macro is the weighted average of its live sources, slewed with a per-macro time constant.
 - **Triggers** (`accent`, `fill`) come from onsets and are honored on the next grid slot.
+- **The partition** (`Router.setPartition`, below) decides which channels may drive which dial:
+  a rule or trigger route is kept only for a channel that owns the dial's area, and every dial
+  whose area has an owner gets a driver, so a single sensor moves all eight.
+
+## Sensors share out the music (`core/src/mapping/partition.ts`)
+
+What sensors control is split into five **domains** of two **areas** each:
+
+| Domain  | Areas                              | Dials and destinations                                |
+| ------- | ---------------------------------- | ----------------------------------------------------- |
+| Rhythm  | `rhythm.drums`, `rhythm.groove`    | energy, accents; drum prob/retrig/micro; swing, fills |
+| Harmony | `harmony.chords`, `harmony.melody` | tension, colour; register, lead/arp tune              |
+| Sound   | `sound.drums`, `sound.tonal`       | texture, brightness; cutoff, timbre, drive, decay…    |
+| Space   | `space.room`, `space.fx`           | space, sends; pan, the effects depth, sensor-fired FX |
+| Motion  | `motion.lfo`, `motion.form`        | LFO rate/depth, chaos; levels, variation              |
+
+`partitionAreas(channels, rules, prev)` deals them out. Channels are grouped by
+`SensorDescriptor.group`, the source the user switched on (`SourceManager` stamps it through a
+proxy of the hub, so channels announced later, like a MIDI knob, carry it too). One group owns
+every area; two to five groups split the domains; six to ten the areas; more share. Then each
+group's areas are dealt to its channels. `deal` gives every holder its best free unit first (the
+best pairs first), then each remaining unit to whoever wants it most, less a little for what it
+already holds; scores come from the kind's dial and trigger rules mapped to areas, a few kind
+affinities (sound → space, daylight and place → harmony, light → sound), the timescale and a
+bonus for what a holder had before, so a new source moves as little as possible. Ties are broken
+by id: the result never depends on the order channels come in.
+
+The engine recomputes it whenever the set of live channels changes (in deterministic mode: the
+channels in the input log) and exposes it as `view.partition`. `buildRoutes` gives each channel
+one strong route per owned area (`areaDest`) from its own random stream, so another sensor
+joining does not reshuffle it; `fxTriggers` come from the owners of `space.fx`; `mutateRoute`
+moves a sensor route only to a destination in its owner's areas (`destArea`); deterministic
+mode's continuous sensors keep their kind's effect when they own its domain, else pick one from
+an owned domain.
 
 ## Sensors reach the music four ways at once
 
@@ -90,16 +124,42 @@ replayed recording gives the same chain.
 - **Patterns, lengths, speeds, base params, LFOs, routings, harmony settings and swing** come from
   the chain.
 
-The engine rebuilds the genome at every section (16 bars), and earlier on a **scene change**: when
-a channel that describes the surroundings (slow channels, light, camera colour and brightness,
-place) moves more than 0.35 from where it was at the last rebuild for a beat, or a channel
-appears or vanishes, at most every 8 bars. A scene change also picks a new key: next to the
-place's key when location is on, otherwise one the sensors choose.
+At every section (16 bars), and earlier on a **scene change**, the engine **evolves** the genome
+(`genome/evolve.ts`) instead of replacing it: `evolveGenome(prev, fresh, rng, {rate, drift,
+palette})` moves the previous genome a step toward a fresh `buildGenome` take. Tracks are matched
+by `TrackSpec.option` (the palette slot they fill) and keep their slot, their phrase mutations
+and their identity; each 4-step block is taken from the fresh take with a probability set by the
+rate and the style's `DriftProfile` (`Style.drift`, per role too); base params walk inside the
+machine's ranges, pulled a little toward the fresh take; LFOs drift; now and then a track takes
+another length, speed or machine of its slot; at most one or two tracks come or go per step.
+Guardrails keep density inside the machine's range (widened to what the generator writes),
+conditions and low probabilities under a share, and the anchors (`anchorSteps`: the downbeat,
+the template hits) in place. Sensor routes stay while their owner's areas stay. Rates: a section
+`0.2·(0.5 + variation)`, a scene 0.65, a resume 0.5; the start and a new style build fresh.
+
+A scene change is due when a channel that describes the surroundings (slow channels, light,
+camera colour and brightness, place) moves more than 0.35 from where it was at the last rebuild
+for a beat, or a channel appears or vanishes. It is set for the next bar line with room to rise
+into it (`sceneAt`), no sooner than 8 bars after the last rebuild; the riser plays in the bar
+before, and a section boundary with a scene due counts as the scene. A scene change also picks a
+new key: next to the place's key when location is on, otherwise one the sensors choose.
+
+**Drift** (`genome/distance.ts`): `genomeDistance(a, b, keys)` compares two genomes track by track
+(matched by slot; a slot holding another kind of track, or a track only one has, counts as 1):
+0.3 machine, 0.4 pattern (Jaccard of the onsets on an unrolled grid, and the notes), 0.1 length
+and speed, 0.2 base params; the total adds the harmony (modes and forms, bias, chord rate, the
+key's distance in fifths, the mode). The engine keeps the first genome and its key as the origin
+and reports `view.drift` every bar: the total, each track, a history and the marks (sections,
+scenes, edits, evolutions).
 
 **Phrase mutation** (`mutatePhrase`): at every phrase start (4 bars) a few trigs flip, p-locks and
 conditions change, a track rotates or changes length, notes move by a step, routes are nudged or
 moved to another track. The random stream is `hash(chain, bar, fine hash)`, so a reading that
-differs by one digit mutates differently. How many changes depends on the variation dial.
+differs by one digit mutates differently. How many changes depends on the variation dial; an op
+that finds nothing to change draws again. Mutations keep the anchors, rotate templated tracks by
+whole periods and change their length only to palette lengths that are whole periods (four on
+the floor stays on the beat), never touch the FX lane's routes, and now persist: evolution builds
+on them.
 
 ### 2. The step sequencer (`core/src/seq`)
 
@@ -190,6 +250,27 @@ fixed way.
   step reads them 0.2 s behind the music. Edits apply at bar lines: the song is rebuilt when the
   edits' version changes, and the new song is fast-forwarded silently from the loop start to the
   current position, so the music at any moment is a function of (edits, position).
+
+- **Zones from Play.** A sensor's first reading sets its start zone, and its count is the number
+  of zones from there (the short way round for circular sensors, whose hysteresis band wraps
+  too), so the seed's own song plays until something moves. `sensors: 'off'` keeps the zone
+  meters but counts nothing. A channel that goes away (`InputModel.takeRemoved`) stops counting.
+- **What lands, and when.** Every edit carries a `description` and the `slots` it lands on
+  (`describeEffect`, `effectTargets`); `SongView.pending` lists inputs registered but not yet
+  applied, with the bar they land on. A numeric target past the last track does nothing unless
+  the effect wraps (catalogue picks for MIDI keys, buttons and other keys, and sensors' hashed
+  rewrites do).
+- **Evolve** (`evolve: true`): a generation lasts `generationBars(loopBars)` (whole loops, at least
+  16 bars). `evolveBase(prev, k)` (`seeded/song.ts`) moves the seed's song a step toward
+  `buildSeededGenome(style, seed, k)` with `evolveTracks` and an rng of `(seed, k)`, and now and
+  then moves the key a fifth; the engine advances its cached generation one at a time and
+  rebuilds with reason `evolve`, so the music is a function of (edits, generation, position).
+- **Exact passes.** Notes carry `loopStep`; the renderer's humanize and the drums' noise offset
+  hash it, so every pass of a loop sounds the same.
+- **Stalls.** `LookaheadScheduler` skips whole steps after a stall and reports how many;
+  `Engine.skip(n, dt)` moves the song's clock and position on and starts the loop over where it
+  is, so inputs keep being read on time. A press stamped before the last read counts at once
+  instead of never.
 
 The tests check exact loops in every style, a new song from the bar after a press and its loop,
 the same version and notes whenever the press came, the three repeat settings, zones and steps,
@@ -316,10 +397,27 @@ least one source switched on; while no channel is live the music waits and start
 after one sends. Because steps are scheduled 120 ms ahead, `Player` queues each step's engine view
 with its audio time and the UI shows the one that is sounding.
 
-- **Transport:** the scope of the mix, Play, **Start over** (`Player.restart`: a new engine and
-  audio clock without releasing the wake lock or the background service), and the genome card: section and phrase, the genome's
-  short hash, where the key came from, and why the pattern was last rewritten (start, new
-  section, new scene and the sensor that caused it).
+- **The look** is a 16-bit console's: blue menu windows with a white bevel (`style.css`, one
+  theme), pixel fonts (Press Start 2P for titles and numbers, Pixelify Sans for text, VT323 for
+  readouts), cartridges for the styles, an A button for Play and a B button for Start over.
+  Canvases read the colour tokens once through `ui/theme.ts`, including a colour per track and
+  per area.
+- **The console:** the screen (below), the scope of the mix, Play, **Start over**
+  (`Player.restart`: a new engine and audio clock without releasing the wake lock or the
+  background service; a second click while one is starting waits for it), the tempo, the
+  cartridges, and the status bar: section and phrase, the genome's short hash, where the key came
+  from, and why the pattern was last rewritten.
+- **The screen** (`ui/stage/`): a 192×108 canvas scaled up by whole pixels. `Stage` casts each
+  part of the style's scene (`scenes/<style>.ts`: a cast of parts by drum voice or role, and a
+  draw function) to a track, follows every step's `TrackView.fired` as a hit envelope, the notes
+  of the step (`Player.events()`) for pitch, the params for brightness and colour, and draws the
+  scene at 30 frames a second; effects act on the whole picture (a stutter jitters it, a tape stop
+  greys and slows it, a wash fogs it…), a rebuild wipes it, a muted figure dozes, and an edit
+  that lands puts a "!" over the figures it moved. `gfx.ts` draws whole pixels and a 3×5 font,
+  `kit.ts` a little figure with poses and props.
+- **Drift** (`ui/drift.ts`), **Who drives what** (`ui/areas.ts`) and the **edit banner**
+  (`ui/banner.ts`, over the screen) show `view.drift`, `view.partition` and the song's pending
+  and landed edits.
 - **Tracks** (`ui/tracks.ts`): one row per track with its machine, length and speed, its own
   scope, a step grid (trigs shaded by velocity, p-lock dots, dashed outlines and labels for
   conditions and probabilities, retrig ticks, micro-timing offsets, the playhead), live param
@@ -339,9 +437,11 @@ with its audio time and the UI shows the one that is sounding.
   exposes analysers on the reverb and delay returns and on the effects bus for its meters.
 - Tempo, style (picking one sets its suggested tempo), the dials, the sources and each sensor's
   value, level, activity, onsets and routes.
-- **Deterministic settings** (Style panel): seed, loop, repeat, sensors, instruments, and the
+- **Song mode** (its own window): seed, loop, Evolve, repeat, sensors, instruments, and the
   input map editor (`ui/inputMap.ts`), one row per `INPUT_ROWS` entry with menus for the effect,
-  its target and how it repeats; saved in prefs and applied at the next Play or Start over.
+  its target and how it repeats; saved in prefs and applied at the next Play or Start over. The
+  Song panel (`ui/changes.ts`) lists pending and applied edits with what they do, and a zone
+  meter per sensor.
 
 ### Sensor sources (`apps/web/src/sensors`)
 
