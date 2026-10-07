@@ -45,7 +45,7 @@ import {
   type SensorMode,
   type SensorZones,
 } from './seeded/edits';
-import { KEY_CODES, LEVELS, describeEffect, keyName } from './seeded/effects';
+import { KEY_CODES, LEVELS, describeEffect, effectTargets, keyName } from './seeded/effects';
 import { InputModel } from './seeded/inputs';
 import { InputMapper, type InputMap } from './seeded/mapping';
 import {
@@ -713,7 +713,7 @@ export class Engine {
       if (version !== det.version) reason ??= 'edit';
       if (reason) {
         const song = buildSong(ev?.spec ?? det.base, edits);
-        det.edits = edits.map((e) => ({ ...e, description: describeEffect(song, e.effect) }));
+        det.edits = edits.map((e) => ({ ...e, ...describeEdit(song, e) }));
         det.version = version;
         det.song = song;
         this.genomeVersion++;
@@ -765,7 +765,7 @@ export class Engine {
         count: next?.count ?? 0,
         was: was?.count ?? 0,
         atBar,
-        ...(song ? { description: describeEffect(song, e.effect) } : {}),
+        ...(song ? describeEdit(song, e) : {}),
       });
     }
     list.sort((a, b) => (a.input < b.input ? -1 : a.input > b.input ? 1 : 0));
@@ -1458,6 +1458,14 @@ function songMacros(song: SongSpec): Macros {
     ...defaultMacros(),
     space: (song.spaceLevel + 0.5) / LEVELS,
     brightness: (song.brightnessLevel + 0.5) / LEVELS,
+  };
+}
+
+/** What an edit does to a song, and the tracks it lands on. */
+function describeEdit(song: SongSpec, e: EditView): { description: string; slots: string[] } {
+  return {
+    description: describeEffect(song, e.effect),
+    slots: e.effect.target === undefined ? [] : effectTargets(song, e.effect).map((t) => t.slot),
   };
 }
 

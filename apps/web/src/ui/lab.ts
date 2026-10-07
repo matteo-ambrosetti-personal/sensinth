@@ -32,6 +32,9 @@ export class LabView {
   private history: LabSample[] = [];
   private hoverAgo: number | undefined;
   private shownVersion = -1;
+  private lastDraw = 0;
+  /** The partition the "Drives" line was written for: it changes with a solo or a new source. */
+  private shownPartition: string | undefined = '';
   private readonly raw: LabChart;
   private readonly proc: LabChart;
   active = false;
@@ -72,7 +75,16 @@ export class LabView {
 
   frame(): void {
     if (!this.active) return;
+    // Thirty frames a second is plenty for a 15-second chart.
+    const tick = performance.now();
+    if (tick - this.lastDraw < 30) return;
+    this.lastDraw = tick;
     if (this.hub.version !== this.shownVersion) this.syncChannels();
+    const partition = this.router().currentPartition?.key;
+    if (partition !== this.shownPartition) {
+      this.shownPartition = partition;
+      this.describe();
+    }
     const now = this.now();
     const ch = this.channelId ? this.hub.get(this.channelId) : undefined;
     const unit = ch?.desc.unit ?? '';

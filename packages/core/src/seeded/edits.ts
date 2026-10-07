@@ -36,6 +36,8 @@ export interface EditView extends SongEdit {
   zone?: number;
   /** What it does to this song, e.g. "Rewrite T1 · Triangle bass". */
   description?: string;
+  /** The tracks it lands on, by slot (none for harmony and mix effects). */
+  slots?: readonly string[];
 }
 
 /** A continuous sensor's zones, for the zone meters. */

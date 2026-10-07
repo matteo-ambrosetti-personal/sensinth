@@ -1,4 +1,5 @@
-import type { ChannelState, Router } from '@sensinth/core';
+import type { Area, ChannelState, PartitionView, Router } from '@sensinth/core';
+import { areaChips } from './areas';
 
 interface Row {
   li: HTMLLIElement;
@@ -17,11 +18,13 @@ export class SensorsView {
     private readonly empty: HTMLElement,
   ) {}
 
-  /** Rebuilds rows when the channel set changes. */
-  rebuild(channels: readonly ChannelState[], router: Router): void {
+  /** Rebuilds rows when the channel set changes, or who controls what. */
+  rebuild(channels: readonly ChannelState[], router: Router, partition: PartitionView): void {
     this.list.replaceChildren();
     this.rows.clear();
     const { macros, triggers } = router.getRoutes();
+    const areas = new Map<string, readonly Area[]>();
+    for (const g of partition.groups) for (const ch of g.channels) areas.set(ch.id, ch.areas);
     for (const ch of channels) {
       const li = document.createElement('li');
       li.className = 'sensor';
@@ -46,6 +49,14 @@ export class SensorsView {
       }
       for (const t of triggers.filter((m) => m.channelId === ch.desc.id)) {
         routes.append(tag(`onset → ${t.trigger}`, 'trigger'));
+      }
+      // The areas of the music it controls.
+      const own = areas.get(ch.desc.id);
+      if (own && own.length > 0) {
+        const box = document.createElement('div');
+        box.className = 'sensor-areas';
+        box.append(areaChips(own));
+        li.append(box);
       }
       this.list.append(li);
       this.rows.set(ch.desc.id, {

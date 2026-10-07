@@ -1,3 +1,5 @@
+import { theme } from './theme';
+
 /**
  * Oscilloscope of the live output. At rest it shows the grid and a flat
  * trace, so the panel is never empty.
@@ -8,7 +10,7 @@ export class Scope {
   private width = 0;
   private height = 0;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
     const resize = () => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -24,10 +26,10 @@ export class Scope {
 
   draw(analyser: AnalyserNode | undefined): void {
     const { ctx, width: w, height: h } = this;
-    const css = getComputedStyle(this.canvas);
+    const t = theme();
     ctx.clearRect(0, 0, w, h);
 
-    ctx.strokeStyle = css.getPropertyValue('--scope-grid').trim() || 'rgba(128,128,128,0.1)';
+    ctx.strokeStyle = t.scopeGrid;
     ctx.lineWidth = 1;
     ctx.beginPath();
     const cell = h / 6;
@@ -41,9 +43,9 @@ export class Scope {
     }
     ctx.stroke();
 
-    ctx.strokeStyle = css.getPropertyValue('--accent').trim() || '#3fd0b8';
-    ctx.lineWidth = Math.max(1.5, h / 90);
-    ctx.lineJoin = 'round';
+    ctx.strokeStyle = t.go;
+    ctx.lineWidth = Math.max(2, Math.round(h / 40));
+    ctx.lineJoin = 'miter';
     ctx.beginPath();
     if (!analyser) {
       ctx.moveTo(0, h / 2);

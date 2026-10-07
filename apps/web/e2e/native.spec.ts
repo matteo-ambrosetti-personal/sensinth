@@ -91,17 +91,13 @@ test('the Android app turns every listed phone sensor into a channel', async ({ 
   // In the app the phone sensors are on from the first start.
   await expect(page.locator('#src-native')).toBeChecked();
   await expect(sensorRow(page, 'Something near')).toBeVisible();
-  await expect(sensorRow(page, 'Something near').locator('.sensor-routes')).toContainText(
-    'onset → accent',
-  );
-  await expect(sensorRow(page, 'Hall sensor').locator('.sensor-routes')).toContainText(
-    'onset → fill',
-  );
+  // Every phone sensor gets its own share of what the phone's source controls.
+  for (const name of ['Something near', 'Hall sensor', 'Heat (thermal headroom)']) {
+    await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
+  }
+  await expect(page.locator('#areas .area-group[data-group="native"]')).toBeVisible();
   await expect(sensorRow(page, 'Battery temperature').locator('.sensor-value')).toContainText(
     '31.5',
-  );
-  await expect(sensorRow(page, 'Heat (thermal headroom)').locator('.sensor-routes')).toContainText(
-    '→ tension',
   );
   await expect(sensorRow(page, 'Wi-Fi signal').locator('.sensor-value')).toContainText('-58');
   // The browser's light sensor gives way to the phone's.

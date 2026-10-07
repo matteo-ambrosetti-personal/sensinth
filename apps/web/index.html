@@ -3,8 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0e1317" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#e8ecef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#06061a" />
     <meta name="description" content="Generative music from your phone sensors." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
@@ -13,11 +12,11 @@
   <body>
     <main class="app">
       <header class="top">
-        <h1 class="brand">sensinth</h1>
+        <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>sensinth</h1>
         <nav class="modes" aria-label="Mode">
           <button id="mode-play" class="mode" type="button" aria-pressed="true">Play</button>
           <button id="mode-flow" class="mode" type="button" aria-pressed="false">Flow</button>
-          <button id="mode-lab" class="mode" type="button" aria-pressed="false">Sensor lab</button>
+          <button id="mode-lab" class="mode" type="button" aria-pressed="false">Lab</button>
         </nav>
         <div class="readout" aria-live="polite">
           <span id="now-key">Stopped</span>
@@ -26,29 +25,60 @@
         </div>
       </header>
 
+      <!-- The console: the screen, the controls under it, the cartridges. -->
       <section class="panel transport" aria-label="Transport">
+        <div class="screen play-only">
+          <canvas id="stage" class="stage" role="img" aria-label="The band, stopped"></canvas>
+          <div id="banner" class="banner" aria-live="polite" hidden></div>
+        </div>
         <canvas id="scope" class="scope" aria-hidden="true"></canvas>
-        <button id="play" class="play" type="button" aria-pressed="false">
-          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M8 5.5v13l10.5-6.5z" />
-          </svg>
-          <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
-          </svg>
-          <span class="play-label">Play</span>
-        </button>
-        <button
-          id="restart"
-          class="restart"
-          type="button"
-          aria-label="Start over"
-          title="Start over"
-          disabled
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 6V2L7 7l5 5V8a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z" />
-          </svg>
-        </button>
+        <div class="deck">
+          <button id="play" class="play" type="button" aria-pressed="false">
+            <svg class="icon-play" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 2h1v1h1v1h1v1h1v2H6v1H5v1H4v1H3z" />
+            </svg>
+            <svg class="icon-stop" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 3h6v6H3z" />
+            </svg>
+            <span class="play-label">Play</span>
+          </button>
+          <button
+            id="restart"
+            class="restart"
+            type="button"
+            aria-label="Start over"
+            title="Start over"
+            disabled
+          >
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              <path
+                d="M5 1h1v1h1v1H6v1H5V3H4v1H3v4h1v1h4V8h1V5h1v4H9v1H8v1H4v-1H3V9H2V4h1V3h1V2h1z"
+              />
+            </svg>
+          </button>
+          <div class="tempo play-only" role="group" aria-labelledby="tempo-title">
+            <h2 id="tempo-title" class="visually-hidden">Tempo</h2>
+            <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
+            <output id="tempo-value" for="tempo" class="bpm">140</output>
+            <span class="bpm-unit">BPM</span>
+            <button id="tempo-up" class="step-btn" type="button" aria-label="Faster">+</button>
+            <button id="tap" class="tap" type="button">Tap</button>
+            <input
+              id="tempo"
+              type="range"
+              min="60"
+              max="200"
+              step="1"
+              value="140"
+              aria-label="Tempo in BPM"
+            />
+          </div>
+        </div>
+        <div class="cartridges play-only">
+          <h2 id="style-title">Style <span class="h2-note">pick a cartridge</span></h2>
+          <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
+          <p id="style-desc" class="style-desc"></p>
+        </div>
         <p class="hint" id="hint">You set tempo and style. The sensors write the rest.</p>
         <dl class="genome" aria-label="What the sensors chose">
           <div>
@@ -126,10 +156,48 @@
         </details>
       </section>
 
+      <!-- Where the music is going, and who is steering it. -->
+      <div class="duo play-only">
+        <section class="panel drift-panel" aria-labelledby="drift-title">
+          <div class="panel-head">
+            <h2 id="drift-title">Drift <span class="h2-note">how far from the start</span></h2>
+            <span id="drift-now" class="badge">–</span>
+          </div>
+          <canvas
+            id="drift"
+            class="drift"
+            role="img"
+            aria-label="How far the music has moved from where it started"
+          ></canvas>
+          <p id="drift-note" class="note">
+            Every section takes the music a step further from where it started. Thin lines: each
+            track. Thick: the whole piece. ★ a new scene.
+          </p>
+        </section>
+        <section class="panel areas-panel" aria-labelledby="areas-title">
+          <h2 id="areas-title">Who drives what</h2>
+          <ul id="areas" class="areas"></ul>
+          <p id="areas-note" class="note">
+            One source alone drives everything. Turn on more and they share it out.
+          </p>
+        </section>
+      </div>
+
       <section class="panel play-only" aria-labelledby="tracks-title">
         <h2 id="tracks-title">
           Tracks <span id="tracks-note" class="h2-note">written by the sensors</span>
         </h2>
+        <ul class="grid-legend" aria-label="How to read the step grids">
+          <li><i class="gl-trig" aria-hidden="true"></i>Step (brighter = louder)</li>
+          <li><i class="gl-cond" aria-hidden="true"></i>Plays only sometimes (1:2, fill, 60%)</li>
+          <li><i class="gl-lock" aria-hidden="true"></i>Own sound on this step</li>
+          <li><i class="gl-roll" aria-hidden="true"></i>Roll</li>
+          <li><i class="gl-head" aria-hidden="true"></i>Now playing</li>
+          <li class="gl-params">
+            CUT filter · DEC decay · TMB timbre · TUN pitch · LVL level · PAN pan; the tick is the
+            track's own value, the bar where the sensors move it
+          </li>
+        </ul>
         <ol id="tracks" class="tracks"></ol>
         <p id="tracks-empty" class="empty">Press play to see each track.</p>
       </section>
@@ -222,36 +290,16 @@
             </div>
           </section>
 
-          <section class="panel play-only" aria-labelledby="tempo-title">
-            <h2 id="tempo-title">Tempo</h2>
-            <div class="tempo">
-              <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
-              <output id="tempo-value" for="tempo" class="bpm">140</output>
-              <span class="bpm-unit">BPM</span>
-              <button id="tempo-up" class="step-btn" type="button" aria-label="Faster">+</button>
-              <button id="tap" class="tap" type="button">Tap</button>
-            </div>
-            <input
-              id="tempo"
-              type="range"
-              min="60"
-              max="200"
-              step="1"
-              value="140"
-              aria-label="Tempo in BPM"
-            />
-          </section>
-
-          <section class="panel play-only" aria-labelledby="style-title">
-            <h2 id="style-title">Style</h2>
-            <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
-            <p id="style-desc" class="style-desc"></p>
-            <div class="seeded">
+          <section class="panel play-only song-mode" aria-labelledby="det-title">
+            <div class="panel-head">
+              <h2 id="det-title">Song mode</h2>
               <label class="switch">
                 <input id="det-on" type="checkbox" />
                 <span class="switch-track" aria-hidden="true"></span>
                 Deterministic
               </label>
+            </div>
+            <div class="seeded">
               <label class="seed-field">
                 Seed
                 <input
@@ -264,8 +312,6 @@
                   value="42"
                 />
               </label>
-            </div>
-            <div id="det-options" class="seeded-options">
               <label class="seed-field">
                 Loop
                 <select id="det-loop">
@@ -276,6 +322,12 @@
                   <option value="16">16 bars</option>
                 </select>
               </label>
+              <label class="seed-check">
+                <input id="det-evolve" type="checkbox" />
+                Evolve
+              </label>
+            </div>
+            <div id="det-options" class="seeded-options">
               <label class="seed-field">
                 Same key again
                 <select id="det-repeat">
@@ -289,6 +341,7 @@
                 <select id="det-sensors">
                   <option value="zones">Zones</option>
                   <option value="steps">Steps</option>
+                  <option value="off">Off (keys only)</option>
                 </select>
               </label>
               <label class="seed-field">
@@ -318,10 +371,16 @@
           <section id="song-panel" class="panel play-only" aria-labelledby="song-title" hidden>
             <h2 id="song-title">Song <span class="h2-note">edited by your inputs</span></h2>
             <p id="song-loop" class="song-loop">–</p>
-            <ul id="changes" class="changes"></ul>
+            <ul
+              id="pending"
+              class="changes pending"
+              aria-label="Changes coming at the next bar"
+            ></ul>
+            <ul id="changes" class="changes" aria-label="Changes in effect"></ul>
             <p id="changes-empty" class="empty">
               No changes: the song loops as it is. Press a key or move a sensor.
             </p>
+            <ul id="zones" class="zones" aria-label="Where each sensor is"></ul>
           </section>
 
           <section class="panel" aria-labelledby="dials-title">
@@ -362,7 +421,7 @@
 
       <section class="panel play-only" aria-labelledby="matrix-title">
         <h2 id="matrix-title">
-          Modulation <span class="h2-note">what moves what, right now</span>
+          Every routing <span class="h2-note">what moves what, right now</span>
         </h2>
         <ul id="matrix" class="matrix"></ul>
         <p id="matrix-empty" class="empty">Press play to see the routings.</p>

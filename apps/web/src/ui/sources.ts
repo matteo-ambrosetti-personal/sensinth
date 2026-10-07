@@ -10,8 +10,31 @@ export class SourcesView {
 
   render(): void {
     const focused = document.activeElement?.id;
+    const wasOpen = this.list.querySelector('details')?.open ?? false;
     this.list.replaceChildren();
-    for (const source of this.manager.sources) {
+    // Sources this device cannot use go in a closed group at the end.
+    const usable = this.manager.sources.filter(
+      (s) => this.manager.state(s.id).status !== 'unsupported',
+    );
+    const other = this.manager.sources.filter(
+      (s) => this.manager.state(s.id).status === 'unsupported',
+    );
+    let target: HTMLElement = this.list;
+    for (const source of [...usable, ...other]) {
+      if (source === other[0]) {
+        const item = document.createElement('li');
+        item.className = 'sources-more';
+        const details = document.createElement('details');
+        details.open = wasOpen;
+        const summary = document.createElement('summary');
+        summary.textContent = `Not on this device (${other.length})`;
+        const ul = document.createElement('ul');
+        ul.className = 'sources';
+        details.append(summary, ul);
+        item.append(details);
+        this.list.append(item);
+        target = ul;
+      }
       const state = this.manager.state(source.id);
       const li = document.createElement('li');
       li.className = `source is-${state.status}`;
@@ -59,7 +82,7 @@ export class SourcesView {
         text.append(a);
       }
       if (source.preview && state.status === 'on') li.append(source.preview);
-      this.list.append(li);
+      target.append(li);
     }
     if (focused) document.getElementById(focused)?.focus();
   }

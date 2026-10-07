@@ -1,3 +1,5 @@
+import { theme } from './theme';
+
 /** One recorded moment of the channel under test. */
 export interface LabSample {
   t: number;
@@ -63,7 +65,7 @@ export class LabChart {
 
   draw(samples: readonly LabSample[], now: number, hoverT: number | undefined): void {
     const { g, width: w, height: h } = this;
-    const c = palette(this.canvas);
+    const c = palette();
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.clearRect(0, 0, w, h);
     const plotW = w - PAD.left - PAD.right;
@@ -88,7 +90,7 @@ export class LabChart {
     const yOf = (v: number) => PAD.top + (1 - (v - lo) / (hi - lo)) * plotH;
 
     // Grid and axis labels (hairline, recessive).
-    g.font = '11px "IBM Plex Mono", ui-monospace, monospace';
+    g.font = `16px ${theme().fontMono}`;
     g.textBaseline = 'middle';
     g.lineWidth = 1;
     g.strokeStyle = c.grid;
@@ -200,18 +202,17 @@ export class LabChart {
   }
 }
 
-function palette(el: Element): Palette {
-  const css = getComputedStyle(el);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+function palette(): Palette {
+  const t = theme();
   return {
-    ink: v('--ink', '#121820'),
-    muted: v('--muted', '#56626e'),
-    grid: v('--line', '#c6cfd7'),
-    surface: v('--panel', '#f7f9fa'),
-    level: v('--chart-level', '#008a72'),
-    activity: v('--chart-activity', '#4a3aa7'),
-    normalized: v('--muted', '#56626e'),
-    onset: v('--chart-onset', '#d9730b'),
+    ink: t.ink,
+    muted: t.muted,
+    grid: t.line,
+    surface: '#000',
+    level: t.chartLevel,
+    activity: t.chartActivity,
+    normalized: t.muted,
+    onset: t.chartOnset,
   };
 }
 

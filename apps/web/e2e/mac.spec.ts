@@ -136,10 +136,11 @@ test('the Mac app starts with its own sensors on', async ({ page }) => {
   await expect(page.locator('#src-mac')).toBeChecked();
   await expect(sensorRow(page, 'Lid angle')).toBeVisible();
   await expect(sensorRow(page, 'Lid angle').locator('.sensor-value')).toContainText('°');
-  await expect(sensorRow(page, 'Chip temperature').locator('.sensor-routes')).toContainText(
-    '→ texture',
-  );
-  await expect(sensorRow(page, 'Idle time').locator('.sensor-routes')).toContainText('→ energy');
+  // With the pointer, keyboard and clock on too, the Mac's sensors get their own part of the music.
+  for (const name of ['Chip temperature', 'Idle time', 'Lid angle']) {
+    await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
+  }
+  await expect(page.locator('#areas .area-group[data-group="mac"]')).toBeVisible();
   // The app reads the lid itself, so the WebHID source is not offered.
   await expect(page.locator('#src-lid')).toHaveCount(0);
 });
