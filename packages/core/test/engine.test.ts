@@ -333,6 +333,89 @@ describe('Engine', () => {
     expect(engine.snapshot().section).toBeGreaterThan(sectionBefore);
   });
 
+  it('turns sensors moved in the last beat of a section into a new scene, with no riser after it', () => {
+    const dt = stepDuration(chiptune.defaultTempo);
+    const end = 16 * STEPS_PER_BAR;
+    for (const jump of [end - 4, end - 3, end - 2]) {
+      const engine = new Engine({ style: chiptune });
+      const source = new SimulatedSource(3);
+      const values = source.sampleAt(0);
+      for (const d of source.descriptors) engine.hub.announce(d);
+      const rebuilds: string[] = [];
+      const risers: number[] = [];
+      for (let step = 0; step < end + 4 * STEPS_PER_BAR; step++) {
+        engine.hub.pushAll(
+          values.map((x) => ({ ...x, t: step * dt, v: step >= jump ? x.v * 0.1 + 50 : x.v })),
+        );
+        for (const ev of engine.tick(dt)) {
+          if (ev.fx === 'sweep' && ev.durSteps === STEPS_PER_BAR) risers.push(ev.step);
+        }
+        const { reason, step: at } = engine.view().rebuild;
+        if (rebuilds.at(-1) !== `${reason}@${at}`) rebuilds.push(`${reason}@${at}`);
+      }
+      expect(rebuilds.slice(0, 2)).toEqual(['start@0', `scene@${end}`]);
+      expect(risers.filter((s) => s >= end)).toEqual([]);
+    }
+  });
+
+  it('shares the areas out as before once the Sensor lab stops soloing', () => {
+    const descs: SensorDescriptor[] = [
+      { id: 'p.x', kind: 'pointer.x', label: 'X', group: 'pointer', range: [0, 1], rateHz: 30 },
+      { id: 'p.y', kind: 'pointer.y', label: 'Y', group: 'pointer', range: [0, 1], rateHz: 30 },
+      {
+        id: 'p.speed',
+        kind: 'pointer.speed',
+        label: 'Speed',
+        group: 'pointer',
+        range: [0, 1],
+        rateHz: 30,
+      },
+      {
+        id: 'm.level',
+        kind: 'sound.level',
+        label: 'Level',
+        group: 'mic',
+        range: [0, 1],
+        rateHz: 30,
+      },
+      {
+        id: 'm.bright',
+        kind: 'sound.brightness',
+        label: 'Colour',
+        group: 'mic',
+        range: [0, 1],
+        rateHz: 30,
+      },
+    ];
+    const engine = new Engine({ style: free });
+    for (const d of descs) engine.hub.announce(d);
+    const dt = stepDuration(free.defaultTempo);
+    let step = 0;
+    const play = (n: number) => {
+      for (const end = step + n; step < end; step++) {
+        engine.hub.pushAll(
+          descs.map((d, i) => ({ id: d.id, t: step * dt, v: 0.4 + 0.1 * Math.sin(step + i) })),
+        );
+        engine.tick(dt);
+      }
+    };
+    const share = () =>
+      engine
+        .view()
+        .partition.groups.map((g) => `${g.group}: ${g.areas.join(' ')}`)
+        .join(' | ');
+    play(2 * STEPS_PER_BAR);
+    const before = share();
+    for (const id of ['p.x', 'm.level']) {
+      engine.router.setSolo(id);
+      play(STEPS_PER_BAR);
+      expect(share()).not.toBe(before);
+      engine.router.setSolo(undefined);
+      play(4 * STEPS_PER_BAR);
+      expect(share()).toBe(before);
+    }
+  });
+
   it('starts in the style picked while it waited for the sensors', () => {
     const engine = new Engine({ style: chiptune });
     const source = new SimulatedSource(2);

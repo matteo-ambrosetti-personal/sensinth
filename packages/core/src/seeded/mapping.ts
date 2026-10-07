@@ -255,7 +255,12 @@ export class InputMapper {
     timescale: Timescale,
     owned?: readonly Domain[],
   ): MappedSensor | undefined {
-    const own = sensorEffect(desc, timescale, owned);
+    const own = sensorEffect(
+      desc,
+      timescale,
+      owned,
+      this.instruments ? undefined : INSTRUMENT_EFFECTS,
+    );
     if (!own || PRESS_KINDS.has(desc.kind)) return undefined;
     const row =
       desc.kind in SENSOR_EFFECTS

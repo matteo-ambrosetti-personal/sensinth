@@ -204,6 +204,39 @@ describe('Router with a partition', () => {
   });
 });
 
+describe('Router following a new share', () => {
+  it('moves the dials to new owners even when the channels are the same', () => {
+    const d = [desc('m.accel', 'motion.accel', 'motion'), desc('l.lux', 'light', 'light')];
+    const hub = hubWith(d);
+    const router = new Router(hub);
+    const p = partitionAreas(
+      hub.list().map((c) => ({
+        id: c.desc.id,
+        kind: c.desc.kind,
+        group: c.desc.group as string,
+        timescale: c.timescale,
+      })),
+    );
+    router.setPartition(p);
+    router.getRoutes();
+    // The same channels (the same key), dealt the other way round.
+    const swap = (id: string) => (id === 'm.accel' ? 'l.lux' : 'm.accel');
+    const swapped = {
+      ...p,
+      channels: {
+        'm.accel': p.channels['l.lux'] ?? [],
+        'l.lux': p.channels['m.accel'] ?? [],
+      } as typeof p.channels,
+      owners: Object.fromEntries(
+        Object.entries(p.owners).map(([a, ids]) => [a, ids.map(swap)]),
+      ) as typeof p.owners,
+    };
+    router.setPartition(swapped);
+    const { macros } = router.getRoutes();
+    for (const r of macros) expect(swapped.channels[r.channelId]).toContain(MACRO_AREA[r.macro]);
+  });
+});
+
 describe('Genome routes with a partition', () => {
   function genomeFor(descs: readonly SensorDescriptor[]) {
     const hub = hubWith(descs);

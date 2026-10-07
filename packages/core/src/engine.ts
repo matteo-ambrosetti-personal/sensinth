@@ -45,7 +45,14 @@ import {
   type SensorMode,
   type SensorZones,
 } from './seeded/edits';
-import { KEY_CODES, LEVELS, describeEffect, effectTargets, keyName } from './seeded/effects';
+import {
+  KEY_CODES,
+  LEVELS,
+  describeEffect,
+  effectTargets,
+  keyName,
+  sensorEffect,
+} from './seeded/effects';
 import { InputModel } from './seeded/inputs';
 import { InputMapper, type InputMap } from './seeded/mapping';
 import {
@@ -363,6 +370,8 @@ export class Engine {
   private readonly det: Seeded | undefined;
   /** Who controls what, for the live channels. */
   private partition: Partition | undefined;
+  /** The last partition of every live channel (not a Sensor lab solo): the next one sticks to it. */
+  private settled: Partition | undefined;
   private partitionKey = '';
   private partitionView: PartitionView = { level: 'all', groups: [] };
   /** Bar line at which a new scene takes over, once one is due. */
@@ -524,7 +533,7 @@ export class Engine {
    * music would share them.
    */
   idle(dt: number): void {
-    this.updatePartition(this.det ? this.det.model.channels() : this.liveChannels());
+    this.updatePartition(this.det ? sharing(this.det, this.det.readT) : this.liveChannels());
     this.router.update(dt);
   }
 
@@ -566,8 +575,9 @@ export class Engine {
       group: groupOf(c.desc),
       timescale: c.timescale,
     }));
-    const p = partitionAreas(channels, rules, this.partition);
+    const p = partitionAreas(channels, rules, this.settled);
     this.partition = p;
+    if (this.det || this.router.solo === undefined) this.settled = p;
     this.router.setPartition(p);
     const labels = new Map(live.map((c) => [c.desc.id, c.desc.label]));
     const groupOfId = new Map(channels.map((c) => [c.id, c.group]));
@@ -682,8 +692,9 @@ export class Engine {
     const start = det.clock;
     det.clock += stepSeconds;
     // Sensors share out their effects among the channels in the log: the same log, the same share.
-    this.updatePartition(det.model.channels());
-    this.readInputs(det, det.origin + start - det.delay);
+    const t = det.origin + start - det.delay;
+    this.updatePartition(sharing(det, t));
+    this.readInputs(det, t);
     this.waiting = false;
     const pos = step % (det.loopBars * STEPS_PER_BAR);
     det.pos = pos;
@@ -975,10 +986,15 @@ export class Engine {
       this.farSteps++;
       this.farChannel = change.channel?.label;
       if (this.farSteps >= SCENE_HOLD && this.sceneAt === undefined) {
-        // The next bar line with time to rise into it, once the scene has had its bars.
+        // The next bar line with time to rise into it, once the scene has had its bars,
+        // and never past the section's end, where it would be lost in the section's rebuild.
         let at = (Math.floor(step / STEPS_PER_BAR) + 1) * STEPS_PER_BAR;
         if (at - step < 4) at += STEPS_PER_BAR;
-        this.sceneAt = Math.max(at, this.sectionStart + SCENE_MIN_BARS * STEPS_PER_BAR);
+        const end = this.sectionStart + this.style.palette.sectionBars * STEPS_PER_BAR;
+        this.sceneAt = Math.min(
+          Math.max(at, this.sectionStart + SCENE_MIN_BARS * STEPS_PER_BAR),
+          end,
+        );
         this.sceneRisen = false;
       }
     } else {
@@ -994,7 +1010,12 @@ export class Engine {
     if (step % STEPS_PER_BAR !== 0) return;
     const { palette } = this.style;
     const barsIn = Math.floor((step - this.sectionStart) / STEPS_PER_BAR);
-    if (this.sceneAt !== undefined && step >= this.sceneAt) {
+    // A section that ends while the sensors are far from where it started ends in a new
+    // scene, even if they have not held there long enough to call one yet.
+    if (
+      (this.sceneAt !== undefined && step >= this.sceneAt) ||
+      (barsIn >= palette.sectionBars && this.farSteps > 0)
+    ) {
       this.section++;
       this.rebuild(step, fp, live, macros, 'scene');
     } else if (barsIn >= palette.sectionBars) {
@@ -1470,6 +1491,19 @@ function describeEdit(song: SongSpec, e: EditView): { description: string; slots
 }
 
 /** A number per track slot, for seeding its rolls. */
+/**
+ * The channels deterministic mode shares the areas among: the continuous
+ * sensors heard by `t`. Keys, buttons and shakes act through their presses
+ * wherever they are, and a sensor that has not read yet can do nothing with
+ * an area, so neither takes one from a sensor that can.
+ */
+function sharing(det: Seeded, t: number): { desc: SensorDescriptor; timescale: Timescale }[] {
+  const heard = new Set(det.model.readings(t).map((r) => r.id));
+  return det.model
+    .channels()
+    .filter((c) => heard.has(c.desc.id) && sensorEffect(c.desc, c.timescale) !== undefined);
+}
+
 function slotSeed(slot: string): number {
   return Number(slot.slice(1)) || slot.length;
 }

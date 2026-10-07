@@ -385,6 +385,18 @@ describe('Deterministic songs', () => {
       const e = mapper.press({ id: KEYS.id, t: 0, kind: 'key', value: v, velocity: 1 }, KEYS.kind);
       expect(e && INSTRUMENT_EFFECTS.has(e.effect.id)).toBeFalsy();
     }
+    // A sensor given areas whose effects change instruments takes another of their effects.
+    for (let i = 0; i < 40; i++) {
+      const d: SensorDescriptor = {
+        id: `y.${i}`,
+        kind: 'pointer.y',
+        label: 'Y',
+        range: [0, 1],
+        rateHz: 30,
+      };
+      const m = mapper.sensor(d, 'medium', ['motion']);
+      expect(m && !INSTRUMENT_EFFECTS.has(m.map.effect.id), d.id).toBe(true);
+    }
   });
 
   it('give inputs the effects you choose, and their own repeat', () => {
@@ -539,6 +551,120 @@ describe('Deterministic songs', () => {
       },
     );
     expect(t.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('give every continuous sensor an effect when several sources share the areas', () => {
+    const at = (d: SensorDescriptor, v: number) => ({ ...d, label: d.id, rateHz: 30, v });
+    const pointer = [
+      at(
+        {
+          id: 'computer.pointerSpeed',
+          kind: 'pointer.speed',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'computer.pointerX',
+          kind: 'pointer.x',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0.5,
+      ),
+      at(
+        {
+          id: 'computer.pointerY',
+          kind: 'pointer.y',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0.5,
+      ),
+      at(
+        {
+          id: 'computer.force',
+          kind: 'pointer.force',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0,
+      ),
+    ];
+    const motion = [
+      at(
+        {
+          id: 'phone.roll',
+          kind: 'orientation.roll',
+          group: 'motion',
+          range: [-90, 90],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'phone.tilt',
+          kind: 'orientation.pitch',
+          group: 'motion',
+          range: [-90, 90],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'phone.shake',
+          kind: 'motion.accel',
+          group: 'motion',
+          range: [0, 30],
+        } as SensorDescriptor,
+        0,
+      ),
+    ];
+    // Announced, but no fix yet: it can do nothing, so it takes nothing.
+    const place = at(
+      {
+        id: 'phone.place',
+        kind: 'geo.place',
+        group: 'location',
+        range: [0, 1],
+      } as SensorDescriptor,
+      0,
+    );
+    const live = [...pointer, ...motion];
+    for (const instruments of [true, false]) {
+      const t = take(
+        chiptune,
+        4,
+        { seed: 42, loopBars: 4, instruments },
+        {
+          descriptors: [...live, place],
+          sampleAt: (time) =>
+            live.map((d) => ({
+              id: d.id,
+              t: time,
+              v: d.id === 'computer.pointerY' && time > 1 ? 0.95 : d.v,
+            })),
+        },
+      );
+      const view = t.engine.view();
+      const listed = view.song?.sensors.map((x) => x.id) ?? [];
+      for (const id of ['computer.pointerX', 'computer.pointerY', 'phone.roll', 'phone.tilt']) {
+        expect(listed, `${id}, instruments ${instruments}`).toContain(id);
+      }
+      const sharing = view.partition.groups.flatMap((g) => g.channels.map((c) => c.id)).sort();
+      expect(sharing).toEqual([
+        'computer.pointerX',
+        'computer.pointerY',
+        'phone.roll',
+        'phone.tilt',
+      ]);
+      expect(
+        t.versions.slice(1).some((v) => v !== 'base'),
+        `instruments ${instruments}`,
+      ).toBe(true);
+    }
   });
 
   it('give number keys past the last track nothing to do', () => {

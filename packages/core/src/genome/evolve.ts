@@ -269,9 +269,44 @@ function channelOf(r: Route): string | undefined {
   return body.slice(0, body.lastIndexOf(':'));
 }
 
+/** A sensor's finest route: its reading's digits nudging one param (see `buildRoutes`). */
+function isJitter(r: Route): boolean {
+  return r.source.endsWith(':jitter');
+}
+
+/**
+ * One sensor's routes after an evolution: its previous ones, a few swapped
+ * (with chance `p` each) for fresh ones of the same strength, never two to
+ * the same place, then topped up to as many strong routes as the fresh take
+ * gives it, so a sensor never fades out over a long piece.
+ */
+function keepRoutes(
+  kept: readonly Route[],
+  theirs: readonly Route[],
+  rng: Rng,
+  p: number,
+): Route[] {
+  const mine: Route[] = [];
+  const taken = (dest: string) => mine.some((m) => m.dest === dest);
+  for (const r of kept) {
+    const spare = theirs.filter((f) => isJitter(f) === isJitter(r) && !taken(f.dest));
+    if (spare.length > 0 && (taken(r.dest) || rng.chance(clamp(p)))) mine.push(rng.pick(spare));
+    else if (!taken(r.dest)) mine.push({ ...r });
+  }
+  const strong = (rs: readonly Route[]) => rs.filter((r) => !isJitter(r)).length;
+  for (const f of theirs) {
+    if (strong(mine) >= strong(theirs)) break;
+    if (!isJitter(f) && !taken(f.dest)) mine.push(f);
+  }
+  return mine;
+}
+
 export interface EvolvedTracks {
   tracks: TrackSpec[];
-  /** Candidate slot → slot in the evolved tracks. */
+  /**
+   * Candidate slot → slot in the evolved tracks, for the candidate's tracks
+   * that are there (matched or joined); a track left out maps nowhere.
+   */
   slotMap: Map<string, string>;
   changes: string[];
 }
@@ -312,7 +347,6 @@ export function evolveTracks(
     const kept = cloneTrack(t);
     evolveTrack(kept, kept, rng, { ...o, rate: o.rate * 0.5 }, density, changes);
     out.push(kept);
-    slotMap.set(t.slot, t.slot);
   }
   for (const c of fresh) {
     const p = byId.get(identity(c));
@@ -334,8 +368,6 @@ export function evolveTracks(
   // Keep the palette's order (drums first, then bass, …), then the slot.
   const order = (t: TrackSpec) => (t.option ?? 99) * 100 + slotNumber(t.slot);
   out.sort((a, b) => order(a) - order(b));
-  // Map the old slots of tracks that stayed onto themselves, for routes.
-  for (const t of out) if (!slotMap.has(t.slot)) slotMap.set(t.slot, t.slot);
   return { tracks: out, slotMap, changes };
 }
 
@@ -374,13 +406,19 @@ export function evolveGenome(
   const lane =
     prevLane && !rng.chance(clamp(rate)) ? cloneTrack(prevLane) : candLane && cloneTrack(candLane);
   next.tracks = lane ? [...tracks, lane] : tracks;
+  // A slot keeps its routes only while the same track holds it: one that joined in a
+  // slot another track left is new there.
+  const was = new Map(prev.tracks.map((t) => [t.slot, identity(t)]));
+  const newSlots = new Set(
+    tracks.filter((t) => was.get(t.slot) !== identity(t)).map((t) => t.slot),
+  );
   const live = new Set(tracks.map((t) => t.slot));
+  const valid = (r: Route) => slotsOf(r).every((s) => live.has(s) && !newSlots.has(s));
 
   // Routes: a sensor whose areas did not change keeps its routes, a few move to the fresh take's.
   const fresh = cand.matrix.routes.flatMap((r) => remapRoute(r, slotMap) ?? []);
   const sameAreas = (ch: string) =>
     (prev.ownership[ch] ?? []).join() === (cand.ownership[ch] ?? []).join() && ch in cand.ownership;
-  const valid = (r: Route) => slotsOf(r).every((s) => live.has(s));
   const routes: Route[] = [];
   const channels = new Set(fresh.flatMap((r) => channelOf(r) ?? []));
   for (const ch of channels) {
@@ -388,22 +426,13 @@ export function evolveGenome(
     const kept = sameAreas(ch)
       ? prev.matrix.routes.filter((r) => channelOf(r) === ch && valid(r))
       : [];
-    if (kept.length === 0) {
-      routes.push(...theirs);
-      continue;
-    }
-    for (const r of kept) {
-      routes.push(
-        rng.chance(clamp(rate * drift.motion)) && theirs.length > 0 ? rng.pick(theirs) : { ...r },
-      );
-    }
+    routes.push(
+      ...(kept.length === 0 ? theirs : keepRoutes(kept, theirs, rng, rate * drift.motion)),
+    );
   }
   // Internal routes (LFOs, chaos, hits, dials): the previous ones, or now and then the fresh set.
   const internal = (rs: readonly Route[]) => rs.filter((r) => channelOf(r) === undefined);
   const prevInternal = internal(prev.matrix.routes).filter(valid);
-  const newSlots = new Set(
-    tracks.filter((t) => !prev.tracks.some((p) => p.slot === t.slot)).map((t) => t.slot),
-  );
   if (rng.chance(clamp(rate * 0.5 * drift.motion)) || prevInternal.length === 0) {
     routes.push(...internal(fresh));
   } else {

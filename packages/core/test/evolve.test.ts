@@ -19,6 +19,8 @@ import {
   lofi,
   mutatePhrase,
   nextChain,
+  parseSensorSource,
+  sourceKind,
   stepDuration,
   techno,
   type Fingerprint,
@@ -34,12 +36,17 @@ function fingerprint(seed = 3): Fingerprint {
   return new Fingerprinter().take(hub.list());
 }
 
-/** A lineage of `n` genomes under frozen sensors, each evolved from the one before. */
-function lineage(style: Style, n: number, rate = 0.16): Genome[] {
-  const fp = fingerprint();
+/**
+ * A lineage of `n` genomes, each evolved from the one before: under frozen
+ * sensors, or with `moving` sensors whose readings change every step, so
+ * the fresh takes bring other instruments.
+ */
+function lineage(style: Style, n: number, rate = 0.16, moving = false): Genome[] {
+  let fp = fingerprint();
   let chain = 1;
   const out = [buildGenome(style, fp, chain, 0, defaultMacros())];
   for (let i = 1; i < n; i++) {
+    if (moving) fp = fingerprint(3 + (i % 7));
     chain = nextChain(chain, fp, i);
     const fresh = buildGenome(style, fp, chain, i, defaultMacros());
     const { genome } = evolveGenome(out[i - 1] as Genome, fresh, new Rng(hashInts(chain, 7)), {
@@ -124,6 +131,36 @@ describe('Evolution', () => {
     const section = evolveGenome(g, fresh, new Rng(5), { ...o, rate: 0.16 }).genome;
     const scene = evolveGenome(g, fresh, new Rng(5), { ...o, rate: 0.65 }).genome;
     expect(genomeDistance(g, scene).total).toBeGreaterThan(genomeDistance(g, section).total);
+  });
+  it('keeps every sensor at two strong routes or more over a long piece', () => {
+    for (const style of [chiptune, lofi, techno]) {
+      for (const g of lineage(style, 31, 0.2)) {
+        const strong = new Map<string, Set<string>>();
+        for (const r of g.matrix.routes) {
+          if (sourceKind(r.source) !== 'sensor') continue;
+          const { channelId, feature } = parseSensorSource(r.source);
+          if (feature !== 'jitter')
+            strong.set(channelId, (strong.get(channelId) ?? new Set()).add(r.dest));
+        }
+        for (const ch of Object.keys(g.ownership)) {
+          expect(strong.get(ch)?.size ?? 0, `${style.id} ${ch}`).toBeGreaterThanOrEqual(2);
+        }
+      }
+    }
+  });
+
+  it('never hands a track the routes of one that left its slot', () => {
+    // The register dial bends melodies only: on any other track, it came with the slot.
+    for (const style of STYLES) {
+      for (const g of lineage(style, 41, 0.65, true)) {
+        const roles = new Map(g.tracks.map((t) => [t.slot, t.role]));
+        for (const r of g.matrix.routes.filter((x) => x.source === 'm:register')) {
+          expect(['lead', 'arp'], `${style.id} ${r.dest}`).toContain(
+            roles.get(r.dest.split('.')[0] as string),
+          );
+        }
+      }
+    }
   });
 });
 

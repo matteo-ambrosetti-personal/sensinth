@@ -70,7 +70,8 @@ export class Router {
 
   /** Shares the dials out by area; `undefined` lets every channel drive its rules' dials. */
   setPartition(partition: Partition | undefined): void {
-    if (partition?.key === this.partition?.key && !!partition === !!this.partition) return;
+    // The same channels can be shared out anew (a style change re-deals them): compare the share, not the key.
+    if (partition === this.partition) return;
     this.partition = partition;
     this.builtFor = '';
   }

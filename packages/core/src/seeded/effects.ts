@@ -286,12 +286,14 @@ const DOMAIN_SENSOR_EFFECTS: Readonly<Record<Domain, readonly SensorEffect[]>> =
  * through presses instead (keys, buttons, and fast sensors such as a shake,
  * whose onsets are presses; pointer speed does nothing). With `owned`, the
  * domains the sensor's areas lie in: it keeps its kind's own effect when
- * that is one of them, else picks one from them.
+ * that is one of them, else picks one from them, leaving out `exclude`d
+ * effects (the instrument changes, when the instruments are fixed).
  */
 export function sensorEffect(
   desc: SensorDescriptor,
   timescale: Timescale,
   owned?: readonly Domain[],
+  exclude?: ReadonlySet<EffectId>,
 ): SensorEffect | undefined {
   if (PRESS_KINDS.has(desc.kind) || timescale === 'fast') return undefined;
   const [lo, hi] = desc.range ?? [0, 1];
@@ -304,8 +306,10 @@ export function sensorEffect(
           centered: lo < 0 && hi > 0,
         });
   if (!owned || owned.length === 0 || owned.includes(EFFECT_DOMAIN[own.effect.id])) return own;
-  const pool = owned.flatMap((d) => DOMAIN_SENSOR_EFFECTS[d]);
-  return pool[hashString(desc.id) % pool.length] as SensorEffect;
+  const pool = owned
+    .flatMap((d) => DOMAIN_SENSOR_EFFECTS[d])
+    .filter((e) => !exclude?.has(e.effect.id));
+  return pool.length > 0 ? (pool[hashString(desc.id) % pool.length] as SensorEffect) : own;
 }
 
 const TARGET_NAMES: Record<Exclude<Target, number>, string> = {
