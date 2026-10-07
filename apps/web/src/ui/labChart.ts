@@ -219,5 +219,8 @@ function palette(): Palette {
 /** Axis label with as many decimals as the visible span needs. */
 export function formatTick(v: number, span: number): string {
   const digits = span >= 100 ? 0 : span >= 10 ? 1 : span >= 1 ? 2 : 3;
-  return v.toFixed(digits);
+  // A slow sensor (the time of day) can move less than 0.001 in the window:
+  // keep enough decimals that the half-span ticks read differently.
+  const fine = span > 0 ? Math.min(6, Math.ceil(-Math.log10(span / 2))) : 0;
+  return v.toFixed(Math.max(digits, fine));
 }

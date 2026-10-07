@@ -11,6 +11,9 @@ const LOOKS = [
   { skin: '#f8d8b8', hair: '#802010', shirt: '#2a2a2a', pants: '#202020' },
 ];
 
+/** The phase dials hang above the players, clear of the title. */
+const DIAL_Y = 46;
+
 /**
  * Minimal: a row of players behind their marimbas, each with a dial that
  * goes round once per loop of its track. Tracks at slightly different
@@ -42,13 +45,13 @@ export const minimal: Scene = {
       const x = Math.round(((k + 0.5) / n) * g.w);
       // The phase dial: once round per loop of the track.
       const ink = '#404048';
-      g.ring(x, 16, 7, 7, ink);
+      g.ring(x, DIAL_Y, 7, 7, ink);
       const ang = a.pos * Math.PI * 2 - Math.PI / 2;
       g.line(
         x,
-        16,
+        DIAL_Y,
         x + Math.round(Math.cos(ang) * 6),
-        16 + Math.round(Math.sin(ang) * 6),
+        DIAL_Y + Math.round(Math.sin(ang) * 6),
         a.hit > 0.4 ? '#e03030' : ink,
       );
       // The player, the mallets, the marimba.
