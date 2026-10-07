@@ -307,6 +307,57 @@ describe('Engine', () => {
     expect(engine.trackMachines().every((m) => m.machineId in ambient.palette.machines)).toBe(true);
   });
 
+  it('rises into a new scene in the bar before it, and counts it as a section', () => {
+    const engine = new Engine({ style: chiptune });
+    const source = new SimulatedSource(3);
+    const values = source.sampleAt(0);
+    for (const d of source.descriptors) engine.hub.announce(d);
+    const dt = stepDuration(chiptune.defaultTempo);
+    const sweeps: number[] = [];
+    let sceneAt = -1;
+    let sectionBefore = -1;
+    for (let step = 0; step < 24 * STEPS_PER_BAR; step++) {
+      // The lights go out after ten bars.
+      const dark = step >= 10 * STEPS_PER_BAR;
+      engine.hub.pushAll(
+        values.map((x) => ({ ...x, t: step * dt, v: x.id === 'sim.light' && dark ? 0 : x.v })),
+      );
+      if (step === 10 * STEPS_PER_BAR) sectionBefore = engine.snapshot().section;
+      for (const ev of engine.tick(dt)) if (ev.fx === 'sweep') sweeps.push(ev.step);
+      const rebuild = engine.view().rebuild;
+      if (sceneAt < 0 && rebuild.reason === 'scene') sceneAt = rebuild.step;
+    }
+    expect(sceneAt).toBeGreaterThan(10 * STEPS_PER_BAR);
+    expect(sceneAt % STEPS_PER_BAR).toBe(0);
+    expect(sweeps.some((s) => s < sceneAt && s >= sceneAt - STEPS_PER_BAR)).toBe(true);
+    expect(engine.snapshot().section).toBeGreaterThan(sectionBefore);
+  });
+
+  it('starts in the style picked while it waited for the sensors', () => {
+    const engine = new Engine({ style: chiptune });
+    const source = new SimulatedSource(2);
+    for (const d of source.descriptors) engine.hub.announce(d);
+    const dt = stepDuration(chiptune.defaultTempo);
+    let firstAmbientBar = -1;
+    for (let step = 0; step < 24 * STEPS_PER_BAR; step++) {
+      const t = step * dt;
+      const bar = Math.floor(step / STEPS_PER_BAR);
+      if (bar < 4 || bar >= 12) engine.hub.pushAll(source.sampleAt(t));
+      engine.hub.markStale(t, 1);
+      if (bar === 8 && step % STEPS_PER_BAR === 0) engine.setStyle(ambient);
+      const events = engine.tick(dt);
+      if (firstAmbientBar < 0 && events.length > 0 && engine.currentStyle.id === 'ambient') {
+        firstAmbientBar = bar;
+      }
+      if (bar >= 12 && events.length > 0) {
+        const machines = engine.trackMachines().map((m) => m.machineId);
+        expect(machines.every((m) => m in ambient.palette.machines)).toBe(true);
+      }
+    }
+    expect(firstAmbientBar).toBeGreaterThanOrEqual(12);
+    expect(firstAmbientBar).toBeLessThanOrEqual(13);
+  });
+
   it('reports a readable snapshot and view', () => {
     const engine = new Engine({ style: chiptune, keyRoot: 9 });
     const source = new SimulatedSource(1);

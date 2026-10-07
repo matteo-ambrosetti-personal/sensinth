@@ -9,6 +9,7 @@ export const chiptune: Style = {
   name: 'Chiptune',
   description: 'Pulse-wave leads, fast arpeggios, triangle bass and noise drums.',
   defaultTempo: 140,
+  drift: { pattern: 1.3, machine: 1.2, harmony: 1.1, roles: { arp: 1.4, lead: 1.2 } },
   palette: {
     modes: ['aeolian', 'dorian', 'mixolydian', 'ionian', 'lydian'],
     progression: {

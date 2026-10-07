@@ -10,6 +10,7 @@ export const techno: Style = {
   name: 'Techno',
   description: 'Four on the floor, offbeat hats, squelchy acid bass and dub chord stabs.',
   defaultTempo: 128,
+  drift: { sound: 1.5, harmony: 0.4, pattern: 1, roles: { drum: 1.5, bass: 1.3 } },
   palette: {
     modes: ['phrygian', 'aeolian', 'dorian'],
     progression: {

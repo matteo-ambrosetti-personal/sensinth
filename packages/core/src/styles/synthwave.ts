@@ -9,6 +9,7 @@ export const synthwave: Style = {
   name: 'Synthwave',
   description: 'Gated snare, driving saw bass, arpeggios, wide pads and a gliding lead.',
   defaultTempo: 104,
+  drift: { sound: 1.3, pattern: 0.9, harmony: 1, roles: { arp: 1.4, lead: 1.2 } },
   palette: {
     modes: ['aeolian', 'dorian', 'ionian', 'lydian'],
     progression: {

@@ -1,13 +1,15 @@
 import { clamp } from '../math';
 import { hashString } from '../random';
 import type { ChannelState } from '../sensors/hub';
-import type { Timescale } from '../sensors/types';
+import { groupOf, type Timescale } from '../sensors/types';
 
 /** One live channel as seen by the genome. */
 export interface ChannelPrint {
   id: string;
   kind: string;
   label: string;
+  /** The source it comes from; not part of either hash. */
+  group: string;
   timescale: Timescale;
   level: number;
   activity: number;
@@ -80,6 +82,7 @@ export class Fingerprinter {
       id,
       kind,
       label,
+      group: groupOf(ch.desc),
       timescale: ch.timescale,
       level,
       activity,

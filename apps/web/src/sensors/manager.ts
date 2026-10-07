@@ -62,7 +62,7 @@ export class SourceManager {
     if (!source || this.isOn(id) || this.state(id).status === 'unsupported') return false;
     this.set(id, { status: 'starting', message: 'Starting…' });
     try {
-      await source.start(this.hub);
+      await source.start(groupedHub(this.hub, id));
       if (this.state(id).status !== 'starting') {
         // Turned off while starting.
         source.stop(this.hub);
@@ -107,4 +107,24 @@ export class SourceManager {
     this.states.set(id, state);
     this.onChange();
   }
+}
+
+/**
+ * The hub as a source sees it: every channel it announces is marked as
+ * coming from that source (unless it says otherwise, like a replay of a
+ * recording), so the music can share out what each source controls.
+ */
+function groupedHub(hub: SensorHub, group: string): SensorHub {
+  return new Proxy(hub, {
+    get(target, prop) {
+      if (prop === 'announce') {
+        return (desc: Parameters<SensorHub['announce']>[0]) =>
+          target.announce({ ...desc, group: desc.group ?? group });
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function'
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 }

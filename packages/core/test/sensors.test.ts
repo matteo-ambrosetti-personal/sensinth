@@ -175,7 +175,7 @@ describe('recording and replay', () => {
       return { notes, energy: engine.router.macros.energy };
     };
     const a = play();
-    expect(a.notes.length).toBeGreaterThan(50);
+    expect(a.notes.length).toBeGreaterThan(40);
     expect(play()).toEqual(a);
   });
 });

@@ -26,6 +26,17 @@ export interface SensorDescriptor {
   circular?: boolean;
   /** The device or adapter that produces this channel. */
   source?: string;
+  /**
+   * The source you switch on that produces it (motion, camera, pointer…).
+   * Sensors share out what they control by group: one group alone drives
+   * everything, several split it.
+   */
+  group?: string;
+}
+
+/** A channel's group: its `group`, else its `source`. */
+export function groupOf(desc: SensorDescriptor): string {
+  return desc.group ?? desc.source ?? 'default';
 }
 
 export interface SensorSample {

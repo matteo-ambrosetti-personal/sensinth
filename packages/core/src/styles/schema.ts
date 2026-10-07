@@ -309,6 +309,44 @@ export interface FxConfig {
   humanize?: number;
 }
 
+/**
+ * How a style drifts away from where it started, section after section.
+ * Each weight scales one kind of change (1 = the default pace, 0 = never).
+ */
+export interface DriftProfile {
+  /** Patterns: how many beats each section takes from a fresh take. */
+  pattern: number;
+  /** Sound: filters, timbre, decay, drive, sends walking. */
+  sound: number;
+  /** Harmony: the modes, chord rate and progression. */
+  harmony: number;
+  /** Rhythm: swing and track lengths. */
+  rhythm: number;
+  /** Phase: track speeds (polymeter against the beat). */
+  phase: number;
+  /** Instruments: another machine for a track, now and then. */
+  machine: number;
+  /** Motion: LFOs, chaos and routings. */
+  motion: number;
+  /** Per role, on top of `pattern`. */
+  roles?: Partial<Record<TrackRole, number>>;
+}
+
+export const DEFAULT_DRIFT: DriftProfile = {
+  pattern: 1,
+  sound: 1,
+  harmony: 1,
+  rhythm: 1,
+  phase: 1,
+  machine: 1,
+  motion: 1,
+};
+
+/** A style's drift, with the defaults for what it leaves out. */
+export function driftOf(style: Pick<Style, 'drift'>): DriftProfile {
+  return { ...DEFAULT_DRIFT, ...style.drift, roles: { ...style.drift?.roles } };
+}
+
 /** A style is pure data: a palette plus effects. Adding a style means adding one of these. */
 export interface Style {
   id: string;
@@ -322,4 +360,6 @@ export interface Style {
   fxPresets?: readonly FxConfig[];
   /** Style-specific mapping rules for the macros, layered over the defaults. */
   mapping?: Partial<MappingRules>;
+  /** How the style drifts over time (default: `DEFAULT_DRIFT`). */
+  drift?: Partial<DriftProfile>;
 }

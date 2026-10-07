@@ -28,12 +28,16 @@ const CAPTURED_CODES = new Set([
   'Slash',
 ]);
 
-/** True when the key goes into a text field (the seed, a file name), not into the music. */
+/**
+ * True when the key goes into a text field (the seed, a file name), not into
+ * the music. A menu that just changed keeps the focus, but the keys still
+ * play the music: only text fields take them.
+ */
 function typingIntoField(e: KeyboardEvent): boolean {
   const el = e.target as HTMLElement | null;
   if (!el || typeof el.closest !== 'function') return false;
   if (el.isContentEditable) return true;
-  const field = el.closest('input, textarea, select');
+  const field = el.closest('input, textarea');
   if (!field) return false;
   const type = (field as HTMLInputElement).type;
   return (

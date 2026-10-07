@@ -15,6 +15,7 @@ import {
   keyCodeIndex,
   keyEffect,
   lofi,
+  minimal,
   stepDuration,
   techno,
   zoneOf,
@@ -261,18 +262,24 @@ describe('Deterministic songs', () => {
 
   it('combine a sensor and a key, whatever came first', () => {
     const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
-    const bright = (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: 3000 }];
+    // The light is dark at Play, then turns bright: zones count from where a sensor started.
+    const brightAfter =
+      (at: number) =>
+      (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: t > at ? 3000 : 0 }];
     const keyThenLight = take(chiptune, 8, o, {
       descriptors: [LIGHT],
-      sampleAt: (t) => (t > midBar(chiptune, 1) ? bright(t) : [{ id: LIGHT.id, t, v: 0 }]),
+      sampleAt: brightAfter(midBar(chiptune, 1)),
       presses: [key('KeyW', midBar(chiptune, 0))],
     });
     const lightThenKey = take(chiptune, 8, o, {
       descriptors: [LIGHT],
-      sampleAt: bright,
+      sampleAt: brightAfter(midBar(chiptune, 0)),
       presses: [key('KeyW', midBar(chiptune, 1))],
     });
-    const lightOnly = take(chiptune, 8, o, { descriptors: [LIGHT], sampleAt: bright });
+    const lightOnly = take(chiptune, 8, o, {
+      descriptors: [LIGHT],
+      sampleAt: brightAfter(midBar(chiptune, 0)),
+    });
     const keyOnly = take(chiptune, 8, o, { presses: [key('KeyW', midBar(chiptune, 0))] });
     const both = keyThenLight.versions[4];
     expect(lightThenKey.versions[4]).toBe(both);
@@ -453,5 +460,144 @@ describe('Deterministic songs', () => {
     expect(zoneOf(0.41, undefined)).toBe(2);
     expect(zoneOf(0.385, 2)).toBe(2);
     expect(zoneOf(0.35, 2)).toBe(1);
+  });
+
+  it('sound the same on every pass of the loop, humanized timing and noise included', () => {
+    const t = take(lofi, 8, { seed: 7, loopBars: 2 });
+    const pass = (from: number) =>
+      t.events
+        .filter((e) => e.step >= from * STEPS_PER_BAR && e.step < (from + 2) * STEPS_PER_BAR)
+        .map((e) => ({ ...e, step: 0 }));
+    expect(pass(2)).toEqual(pass(4));
+    expect(pass(4)).toEqual(pass(6));
+    expect(t.events.every((e) => e.loopStep === e.step % (2 * STEPS_PER_BAR))).toBe(true);
+  });
+
+  it('catch up after the clock stalls, as if it never had', () => {
+    const o = { seed: 3, loopBars: 4 };
+    const press = key('KeyQ', midBar(chiptune, 5));
+    const whole = take(chiptune, 8, o, { presses: [press] });
+    // The same run, with 11 steps skipped in bar 2.
+    const hub = new SensorHub();
+    hub.announce(KEYS);
+    const engine = new Engine({ style: chiptune, hub, deterministic: { ...o, origin: 0 } });
+    const dt = stepDuration(chiptune.defaultTempo);
+    const events: NoteEvent[] = [];
+    let pressed = false;
+    for (let step = 0; step < 8 * STEPS_PER_BAR; step++) {
+      if (step === 2 * STEPS_PER_BAR + 3) {
+        engine.skip(11, dt);
+        step += 11;
+      }
+      if (!pressed && step * dt >= press.t) {
+        hub.emit(press);
+        pressed = true;
+      }
+      events.push(...engine.tick(dt));
+    }
+    engine.dispose();
+    expect(bars(events, 3, 8)).toEqual(bars(whole.events, 3, 8));
+  });
+
+  it('hear the seed’s own song while sensors stay where they were at Play', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
+    const tilted = take(chiptune, 8, o, {
+      descriptors: [TILT],
+      sampleAt: (t) => [{ id: TILT.id, t, v: 60 }],
+    });
+    expect(tilted.versions.every((v) => v === 'base')).toBe(true);
+    const off = take(
+      chiptune,
+      8,
+      { ...o, sensors: 'off' },
+      {
+        descriptors: [TILT],
+        sampleAt: (t) => [{ id: TILT.id, t, v: t > 1 ? 80 : -80 }],
+      },
+    );
+    expect(off.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('keep a compass steady around north', () => {
+    const HEADING: SensorDescriptor = {
+      id: 'phone.heading',
+      kind: 'heading',
+      label: 'Compass',
+      range: [0, 360],
+      circular: true,
+      rateHz: 20,
+    };
+    const t = take(
+      chiptune,
+      8,
+      { seed: 42, loopBars: 4 },
+      {
+        descriptors: [HEADING],
+        sampleAt: (time) => [
+          { id: HEADING.id, t: time, v: Math.round(time * 20) % 2 === 0 ? 359 : 1 },
+        ],
+      },
+    );
+    expect(t.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('give number keys past the last track nothing to do', () => {
+    let seed = 1;
+    let tracks = 0;
+    for (; seed < 200; seed++) {
+      const probe = take(minimal, 1, { seed, loopBars: 2 });
+      tracks = probe.engine.view().tracks.filter((x) => x.role !== 'fx').length;
+      if (tracks < 6) break;
+    }
+    expect(tracks).toBeLessThan(6);
+    const o = { seed, loopBars: 2 };
+    const base = take(minimal, 6, o);
+    const pressed = take(minimal, 6, o, { presses: [key('Digit6', midBar(minimal, 0))] });
+    expect(bars(pressed.events, 2, 6)).toEqual(bars(base.events, 2, 6));
+    expect(pressed.engine.view().song?.edits[0]?.description).toMatch(/no such track/);
+  });
+
+  it('show an edit as pending, with what it does, until the bar it lands on', () => {
+    const o = { seed: 42, loopBars: 4 };
+    const pendings: { step: number; pending: number; atBar?: number; text?: string }[] = [];
+    const t = take(chiptune, 4, o, {
+      presses: [key('KeyQ', midBar(chiptune, 0))],
+      onStep: (_e, engine) => {
+        const song = engine.view().song;
+        const p = song?.pending[0];
+        pendings.push({
+          step: engine.snapshot().step,
+          pending: song?.pending.length ?? 0,
+          ...(p ? { atBar: p.atBar, ...(p.description ? { text: p.description } : {}) } : {}),
+        });
+      },
+    });
+    const waiting = pendings.filter((p) => p.pending > 0);
+    expect(waiting.length).toBeGreaterThan(0);
+    expect(waiting.every((p) => p.step < STEPS_PER_BAR && p.atBar === 1)).toBe(true);
+    expect(waiting[0]?.text).toMatch(/^Rewrite T1 · /);
+    expect(pendings.filter((p) => p.step >= STEPS_PER_BAR).every((p) => p.pending === 0)).toBe(
+      true,
+    );
+    expect(t.engine.view().song?.edits[0]?.description).toMatch(/^Rewrite T1 · /);
+  });
+
+  it('evolve the same way every time, each generation looping exactly', () => {
+    const o = { seed: 9, loopBars: 4, evolve: true };
+    const a = take(lofi, 40, o);
+    const b = take(lofi, 40, o);
+    expect(a.events).toEqual(b.events);
+    expect(a.versions[0]).toBe('base');
+    expect(a.versions[16]).toBe('base.g1');
+    expect(a.versions[32]).toBe('base.g2');
+    expect(bars(a.events, 16, 20)).toEqual(bars(a.events, 20, 24));
+    expect(bars(a.events, 16, 20)).not.toEqual(bars(a.events, 12, 16));
+    // Evolve off: the seed's song all the way.
+    const still = take(lofi, 40, { seed: 9, loopBars: 4 });
+    expect(still.versions.every((v) => v === 'base')).toBe(true);
+    // A press lands the same whenever it came, evolution or not.
+    const early = take(lofi, 28, o, { presses: [key('KeyW', midBar(lofi, 17))] });
+    const late = take(lofi, 28, o, { presses: [key('KeyW', midBar(lofi, 18))] });
+    expect(bars(early.events, 20, 28)).toEqual(bars(late.events, 20, 28));
   });
 });

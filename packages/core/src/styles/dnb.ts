@@ -10,6 +10,7 @@ export const dnb: Style = {
   name: 'Drum & bass',
   description: 'Fast breakbeats with rolls, a deep reese bass, a sub and atmospheric pads.',
   defaultTempo: 172,
+  drift: { pattern: 1.2, sound: 1.3, harmony: 0.7, roles: { drum: 1.5, bass: 1.2 } },
   palette: {
     modes: ['phrygian', 'aeolian', 'dorian'],
     progression: {

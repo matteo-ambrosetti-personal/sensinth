@@ -9,6 +9,7 @@ export const blues: Style = {
   name: 'Blues',
   description: '12-bar shuffle, walking bass, organ and a lead that bends to blue notes.',
   defaultTempo: 96,
+  drift: { harmony: 0.6, pattern: 1.2, sound: 0.9, machine: 0.8, roles: { lead: 1.4 } },
   palette: {
     modes: ['mixolydian'],
     progression: { 0: { 0: 1 } },

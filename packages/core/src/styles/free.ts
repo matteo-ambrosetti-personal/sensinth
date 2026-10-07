@@ -84,6 +84,8 @@ export function freeStyle(styles: readonly Style[]): Style {
     name: 'Free',
     description: 'No style: the sensors choose the instruments too, from every style.',
     defaultTempo: 120,
+    // Free wanders furthest: other instruments and other harmony come more often.
+    drift: { machine: 1.8, harmony: 1.3, pattern: 1.2, sound: 1.2 },
     palette: buildFreePalette(styles),
     fx: fxPresets[0] as FxConfig,
     fxPresets,

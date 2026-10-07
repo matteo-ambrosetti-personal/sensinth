@@ -1,8 +1,17 @@
-import { clamp } from '../math';
+import { destArea } from '../mapping/partition';
+import { clamp, mod } from '../math';
 import { parseSensorSource, sourceKind } from '../mod/matrix';
 import type { Rng } from '../random';
-import { newTrigAt, randomCondition, randomLocks, randomRetrig } from '../seq/generate';
-import { MAX_TRACK_LENGTH, type TrackSpec, type Trig } from '../seq/types';
+import {
+  anchorSteps,
+  newTrigAt,
+  randomCondition,
+  randomLocks,
+  randomRetrig,
+  templatePeriod,
+} from '../seq/generate';
+import { MAX_TRACK_LENGTH, type TrackRole, type TrackSpec, type Trig } from '../seq/types';
+import type { Palette } from '../styles/schema';
 import { SENSOR_ROUTE_MIN, type Genome } from './genome';
 
 type Op =
@@ -21,35 +30,58 @@ const OPS: readonly [Op, number][] = [
   ['micro', 1],
 ];
 
+/** The only changes the FX lane takes: its effects come and go, and their conditions change. */
+const LANE_OPS: ReadonlySet<Op> = new Set<Op>(['flip', 'cond', 'prob']);
+/** Draws an op may take to find something it can change. */
+const TRIES = 3;
+/** Params that change what is played: only tracks with a rhythm take them. */
+const RHYTHM_PARAMS = new Set(['prob', 'retrig', 'micro']);
+const RHYTHMIC_ROLES: readonly TrackRole[] = ['drum', 'bass', 'lead', 'arp', 'chords'];
+
 /**
  * Mutates the genome in place at a phrase start: a few trigs, locks,
  * conditions, notes and routes change. `amount` (0..1, from how much the
  * sensors move) sets how many. Returns a short description of each change.
  * The random stream comes from the fine fingerprint, so a slightly different
- * reading mutates differently.
+ * reading mutates differently. The steps that hold a pattern together (the
+ * downbeat, four on the floor, the backbeat) stay where they are; with the
+ * palette, templated tracks may also change length by whole periods.
  */
-export function mutatePhrase(genome: Genome, rng: Rng, amount: number): string[] {
+export function mutatePhrase(
+  genome: Genome,
+  rng: Rng,
+  amount: number,
+  palette?: Palette,
+): string[] {
   const done: string[] = [];
   const count = 1 + Math.round(clamp(amount) * 4);
   for (let i = 0; i < count; i++) {
-    const op = (OPS[rng.weightedIndex(OPS.map(([, w]) => w))] as [Op, number])[0];
-    const note = apply(genome, rng, op);
-    if (note) done.push(note);
+    for (let tries = 0; tries < TRIES; tries++) {
+      const op = (OPS[rng.weightedIndex(OPS.map(([, w]) => w))] as [Op, number])[0];
+      const note = apply(genome, rng, op, palette);
+      if (note) {
+        done.push(note);
+        break;
+      }
+    }
   }
   return done;
 }
 
-function apply(genome: Genome, rng: Rng, op: Op): string | undefined {
-  const tracks = genome.tracks.filter((t) => t.role !== 'drone' && t.role !== 'pad');
+function apply(genome: Genome, rng: Rng, op: Op, palette?: Palette): string | undefined {
   if (op === 'route') return mutateRoute(genome, rng);
+  const tracks = genome.tracks.filter(
+    (t) => t.role !== 'drone' && t.role !== 'pad' && (t.role !== 'fx' || LANE_OPS.has(op)),
+  );
   if (tracks.length === 0) return undefined;
   const track = rng.pick(tracks);
-  const placed = placedTrigs(track);
+  const anchors = anchorSteps(track);
+  const placed = placedTrigs(track).filter((p) => !anchors.has(p.index));
   const pickTrig = () => (placed.length > 0 ? rng.pick(placed) : undefined);
   switch (op) {
     case 'flip': {
       const i = rng.int(1, Math.max(1, track.length - 1)) % track.length;
-      if (i === 0) return undefined;
+      if (i === 0 || anchors.has(i)) return undefined;
       if (track.trigs[i]) {
         track.trigs[i] = undefined;
         return `${track.slot}: removed step ${i + 1}`;
@@ -76,19 +108,10 @@ function apply(genome: Genome, rng: Rng, op: Op): string | undefined {
       p.trig.prob = Math.round(rng.range(0.3, 1) * 20) / 20;
       return `${track.slot}: probability on step ${p.index + 1}`;
     }
-    case 'rotate': {
-      const dir = rng.chance(0.5) ? 1 : -1;
-      const n = track.length;
-      const old = track.trigs.slice(0, n);
-      for (let i = 0; i < n; i++) track.trigs[i] = old[(((i - dir) % n) + n) % n];
-      return `${track.slot}: rotated ${dir > 0 ? 'right' : 'left'}`;
-    }
-    case 'length': {
-      const next = clamp(track.length + (rng.chance(0.5) ? 1 : -1), 2, MAX_TRACK_LENGTH);
-      while (track.trigs.length < next) track.trigs.push(undefined);
-      track.length = next;
-      return `${track.slot}: length ${next}`;
-    }
+    case 'rotate':
+      return rotateTrack(track, rng.chance(0.5) ? 1 : -1);
+    case 'length':
+      return changeLength(track, rng, palette);
     case 'note': {
       const p = pickTrig();
       if (!p?.trig.note) return undefined;
@@ -114,19 +137,82 @@ function apply(genome: Genome, rng: Rng, op: Op): string | undefined {
   return undefined;
 }
 
-/** Nudges a route's amount, or moves it to the same param on another track. */
+/**
+ * Rotates a track by one step, keeping what holds it together: a templated
+ * track moves by a whole period (so four on the floor stays on the beat), a
+ * drum or bass track keeps its downbeat and rotates the steps after it.
+ */
+function rotateTrack(track: TrackSpec, dir: 1 | -1): string | undefined {
+  const n = track.length;
+  if (n < 2) return undefined;
+  const period = templatePeriod(track);
+  const label = `${track.slot}: rotated ${dir > 0 ? 'right' : 'left'}`;
+  if (period > 1) {
+    if (n % period !== 0 || n === period) return undefined;
+    const old = track.trigs.slice(0, n);
+    for (let i = 0; i < n; i++) track.trigs[i] = old[mod(i - dir * period, n)];
+    return label;
+  }
+  const from = track.role === 'drum' || track.role === 'bass' ? 1 : 0;
+  const span = n - from;
+  if (span < 2) return undefined;
+  const old = track.trigs.slice(from, n);
+  for (let i = 0; i < span; i++) track.trigs[from + i] = old[mod(i - dir, span)];
+  return label;
+}
+
+/**
+ * A track one step longer or shorter. A templated track only takes the
+ * palette's lengths that are whole periods of its template, so a kick on
+ * every beat never drifts off the bar.
+ */
+function changeLength(track: TrackSpec, rng: Rng, palette?: Palette): string | undefined {
+  const period = templatePeriod(track);
+  let next: number;
+  if (period > 1) {
+    const machine = palette?.machines[track.machine];
+    const lengths = machine?.lengths ?? palette?.lengths ?? [];
+    const options = [...new Set(lengths)].filter((l) => l % period === 0 && l !== track.length);
+    if (options.length === 0) return undefined;
+    next = rng.pick(options);
+  } else {
+    next = clamp(track.length + (rng.chance(0.5) ? 1 : -1), 2, MAX_TRACK_LENGTH);
+    if (next === track.length) return undefined;
+  }
+  while (track.trigs.length < next) track.trigs.push(undefined);
+  track.length = next;
+  return `${track.slot}: length ${next}`;
+}
+
+/**
+ * Nudges a route's amount, or moves it to the same param on another track.
+ * Routes never move to the FX lane, rhythm params only move to tracks with
+ * a rhythm, and a sensor's route only moves inside the areas it controls.
+ */
 function mutateRoute(genome: Genome, rng: Rng): string | undefined {
   const routes = genome.matrix.routes;
   if (routes.length === 0) return undefined;
   const route = rng.pick(routes);
   const fromSensor = sourceKind(route.source) === 'sensor';
+  const channel = fromSensor ? parseSensorSource(route.source).channelId : undefined;
   const strongSensor = fromSensor && parseSensorSource(route.source).feature !== 'jitter';
   const dot = route.dest.indexOf('.');
   const slot = route.dest.slice(0, dot);
-  const others = genome.tracks.filter((t) => t.slot !== slot);
-  if (/^t\d+$/.test(slot) && others.length > 0 && rng.chance(0.25)) {
-    route.dest = `${rng.pick(others).slot}${route.dest.slice(dot)}`;
-    return `route moved to ${route.dest}`;
+  const param = route.dest.slice(dot + 1);
+  const roles = new Map(genome.tracks.map((t) => [t.slot, t.role]));
+  if (/^t\d+$/.test(slot) && rng.chance(0.25)) {
+    const owned = channel !== undefined ? genome.ownership[channel] : undefined;
+    const others = genome.tracks.filter((t) => {
+      if (t.slot === slot || t.role === 'fx') return false;
+      if (RHYTHM_PARAMS.has(param) && !RHYTHMIC_ROLES.includes(t.role)) return false;
+      if (!owned) return true;
+      const area = destArea(`${t.slot}.${param}`, (s) => roles.get(s));
+      return area !== undefined && owned.includes(area);
+    });
+    if (others.length > 0) {
+      route.dest = `${rng.pick(others).slot}.${param}`;
+      return `route moved to ${route.dest}`;
+    }
   }
   const sign = Math.sign(route.amount) || 1;
   const magnitude = Math.abs(route.amount) + rng.range(-0.2, 0.2);

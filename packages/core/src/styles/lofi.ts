@@ -9,6 +9,7 @@ export const lofi: Style = {
   name: 'Lo-fi',
   description: 'Dusty electric piano, round bass and lazy swung drums.',
   defaultTempo: 82,
+  drift: { pattern: 0.8, sound: 1.2, harmony: 1.2, rhythm: 0.7, roles: { chords: 1.3 } },
   palette: {
     modes: ['aeolian', 'dorian', 'mixolydian', 'ionian'],
     progression: {

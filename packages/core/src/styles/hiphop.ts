@@ -9,6 +9,7 @@ export const hiphop: Style = {
   name: 'Hip-hop',
   description: 'Hard drums, rolling hats, a sliding 808, dusty keys and blue-note hooks.',
   defaultTempo: 90,
+  drift: { pattern: 1, sound: 1.1, harmony: 0.8, roles: { drum: 1.3 } },
   palette: {
     modes: ['phrygian', 'aeolian', 'dorian'],
     progression: {

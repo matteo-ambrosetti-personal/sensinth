@@ -131,7 +131,7 @@ const locationSource = new LocationSource();
 player.keyHint = () => locationSource.keyHint();
 const keyboard = new KeyboardSource();
 // While a deterministic song plays, keys such as Space and the arrows play it, not the page.
-keyboard.capture = () => player.playing && player.deterministic !== undefined;
+keyboard.capture = () => player.playingDeterministic;
 const sources = new SourceManager(player.hub, [
   new MotionSource(),
   new PointerSource(),
@@ -153,7 +153,6 @@ const sources = new SourceManager(player.hub, [
   new SimulatedWebSource(),
 ]);
 const sourcesView = new SourcesView($('sources'), sources, (id, on) => void toggleSource(id, on));
-sources.onChange = () => sourcesView.render();
 sourcesView.render();
 
 /**
@@ -353,8 +352,10 @@ const REPEAT_TEXT: Record<RepeatMode, string> = {
   once: 'Only the first press of each key counts.',
 };
 const SENSOR_TEXT: Record<SensorMode, string> = {
-  zones: 'Sensors act by zone: back in a zone, back to its song.',
+  zones:
+    'Sensors act by zone, counted from where they were at Play: back in a zone, back to its song.',
   steps: 'Sensors act in steps: each zone crossed counts as a press.',
+  off: 'Sensors change nothing: only keys and presses edit the song.',
 };
 
 /** Applies the settings; `remap` redraws the input map (its defaults changed). */
@@ -368,7 +369,9 @@ function applyDeterministic(remap = true): void {
   const mapping = inputMap.map;
   detSeed.value = String(seed);
   player.setDeterministic(
-    detOn.checked ? { seed, loopBars, repeat, sensors, instruments, mapping } : undefined,
+    detOn.checked
+      ? { seed, loopBars, repeat, sensors, instruments, mapping, evolve: false }
+      : undefined,
   );
   for (const el of [detSeed, detLoop, detRepeat, detSensors, detInstruments]) {
     el.disabled = !detOn.checked;
@@ -528,6 +531,7 @@ const REBUILD = {
   style: 'new style',
   resume: 'sensors back',
   edit: 'your edit',
+  evolve: 'evolved',
 };
 
 function renderGenome(view: EngineView | undefined): void {

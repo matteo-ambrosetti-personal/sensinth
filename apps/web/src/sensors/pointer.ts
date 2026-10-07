@@ -71,8 +71,9 @@ export class PointerSource implements WebSensorSource {
     this.y = Math.min(1, Math.max(0, 1 - e.clientY / h));
   };
   private readonly onPress = (e: PointerEvent) => {
-    // Force Touch reports through its own event; elsewhere a mouse button reads 0.5.
-    if (!this.forceTouch) this.force = e.buttons ? e.pressure : 0;
+    // Force Touch reports through its own event. Only a pen measures how hard it
+    // presses; a mouse button always reads 0.5, so a click is not a hard press.
+    if (!this.forceTouch) this.force = e.buttons && e.pointerType === 'pen' ? e.pressure : 0;
   };
   private readonly onRelease = () => {
     this.force = 0;

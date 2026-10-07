@@ -156,7 +156,14 @@ export class DrumMachine implements Instrument {
       if (layer.kind === 'tone') {
         this.tone(t, ev.vel * layer.gain * body, layer, pitch, decay);
       } else {
-        this.noiseHit(t, ev.vel * layer.gain * air, layer, Math.sqrt(pitch), decay, ev.step);
+        this.noiseHit(
+          t,
+          ev.vel * layer.gain * air,
+          layer,
+          Math.sqrt(pitch),
+          decay,
+          ev.loopStep ?? ev.step,
+        );
       }
     }
   }

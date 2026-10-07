@@ -1,5 +1,7 @@
 import { FX_IDS, KIND_FX, type FxId } from '../fx/effects';
 import type { Macros } from '../mapping/macros';
+import { AREAS, domainOf, partitionAreas, type Area, type Partition } from '../mapping/partition';
+import { DEFAULT_MAPPING, mergeRules } from '../mapping/rules';
 import { clamp } from '../math';
 import {
   CURVES,
@@ -20,8 +22,7 @@ import {
 import type { TrackParam } from '../mod/params';
 import { Rng, hashInts, hashString } from '../random';
 import { fxLane, generateTrack } from '../seq/generate';
-import type { TrackRole, TrackSpec } from '../seq/types';
-import type { Timescale } from '../sensors/types';
+import { cloneTrack, type TrackRole, type TrackSpec } from '../seq/types';
 import type { FxConfig, Palette, Style } from '../styles/schema';
 import { byBrightness, type ModeId } from '../theory/scales';
 import type { ChannelPrint, Fingerprint } from './fingerprint';
@@ -57,6 +58,8 @@ export interface Genome {
   fx?: FxConfig;
   /** Which effect each fast sensor's events fire. */
   fxTriggers: FxTrigger[];
+  /** The areas each live channel controls (see `partitionAreas`). */
+  ownership: Record<string, Area[]>;
 }
 
 /** A sensor whose events (onsets) fire an effect on the whole mix. */
@@ -82,12 +85,18 @@ export function firstChain(seed: number, fp: Fingerprint): number {
 /** Minimum strength of a route from a sensor, so every sensor is clearly audible. */
 export const SENSOR_ROUTE_MIN = 0.4;
 
+/** The partition of a fingerprint's channels by the style's rules. */
+export function partitionOf(style: Style, fp: Fingerprint, prev?: Partition): Partition {
+  return partitionAreas(fp.channels, mergeRules(DEFAULT_MAPPING, style.mapping), prev);
+}
+
 export function buildGenome(
   style: Style,
   fp: Fingerprint,
   chain: number,
   section: number,
   macros: Readonly<Macros>,
+  partition: Partition = partitionOf(style, fp),
 ): Genome {
   const { palette } = style;
   // Machines and track count depend only on the coarse fingerprint: they stay
@@ -98,13 +107,14 @@ export function buildGenome(
   const rng = new Rng(chain);
 
   const density = clamp(0.3 + 0.5 * macros.energy + rng.range(-0.2, 0.2));
-  const tracks = slots.map(({ slot, machineId }) =>
+  const tracks = slots.map(({ slot, machineId, option }) =>
     generateTrack(rng.fork(slot), {
       slot,
       machineId,
       machine: palette.machines[machineId] as NonNullable<Palette['machines'][string]>,
       palette,
       density: clamp(density + rng.range(-0.25, 0.25)),
+      option,
     }),
   );
 
@@ -126,7 +136,7 @@ export function buildGenome(
     section,
     tracks: fxTrack ? [...tracks, fxTrack] : tracks,
     matrix: {
-      routes: buildRoutes(rng.fork('routes'), fp, tracks),
+      routes: buildRoutes(rng.fork('routes'), fp, tracks, partition),
       lfos: Object.fromEntries(tracks.map((t) => [t.slot, t.lfo])),
       chaos: {
         a: { start: (fp.fineHash % 9973) / 9973, r: rng.range(0.3, 0.95) },
@@ -141,29 +151,77 @@ export function buildGenome(
     },
     swing: rng.next(),
     density,
-    fxTriggers: fxTriggers(fp, chain, effects),
+    fxTriggers: fxTriggers(fp.channels, chain, effects, partition),
+    ownership: ownershipOf(fp, partition),
     ...(style.fxPresets && style.fxPresets.length > 0
       ? { fx: style.fxPresets[hashInts(chain, 0xf0) % style.fxPresets.length] as FxConfig }
       : {}),
   };
 }
 
-/** Fast sensors (and the lid) fire effects: the kind's own effect when the style allows it. */
-function fxTriggers(fp: Fingerprint, chain: number, effects: readonly FxId[]): FxTrigger[] {
-  if (effects.length === 0) return [];
-  return fp.channels
-    .filter((ch) => ch.timescale === 'fast' || ch.kind in KIND_FX)
-    .map((ch) => {
-      const own = KIND_FX[ch.kind];
-      const fx =
-        own && effects.includes(own)
-          ? own
-          : (effects[hashInts(hashString(ch.kind), chain) % effects.length] as FxId);
-      return { channelId: ch.id, fx };
-    });
+function ownershipOf(fp: Fingerprint, partition: Partition): Record<string, Area[]> {
+  return Object.fromEntries(
+    fp.channels.map((c) => [c.id, [...(partition.channels[c.id] ?? AREAS)]]),
+  );
 }
 
-function chooseMachines(palette: Palette, rng: Rng): { slot: string; machineId: string }[] {
+/** Copies a genome, so evolving or mutating the copy leaves the original as it was. */
+export function cloneGenome(g: Genome): Genome {
+  return {
+    ...g,
+    tracks: g.tracks.map(cloneTrack),
+    matrix: {
+      routes: g.matrix.routes.map((r) => ({ ...r })),
+      lfos: Object.fromEntries(Object.entries(g.matrix.lfos).map(([k, v]) => [k, { ...v }])),
+      chaos: { a: { ...g.matrix.chaos.a }, b: { ...g.matrix.chaos.b } },
+    },
+    harmony: {
+      ...g.harmony,
+      modes: [...g.harmony.modes],
+      forms: [...g.harmony.forms],
+      progressionBias: [...g.harmony.progressionBias],
+    },
+    fxTriggers: g.fxTriggers.map((t) => ({ ...t })),
+    ownership: Object.fromEntries(Object.entries(g.ownership).map(([k, v]) => [k, [...v]])),
+    ...(g.fx ? { fx: { ...g.fx } } : {}),
+  };
+}
+
+/**
+ * Effects fired by sensor events, from the channels that control the
+ * effects area: a fast one (or the lid, a cover…) fires its kind's own
+ * effect when the style allows it, else one the chain picks.
+ */
+export function fxTriggers(
+  channels: readonly Pick<ChannelPrint, 'id' | 'kind' | 'timescale'>[],
+  chain: number,
+  effects: readonly FxId[],
+  partition?: Partition,
+): FxTrigger[] {
+  if (effects.length === 0) return [];
+  const owners = new Set(partition ? partition.owners['space.fx'] : channels.map((c) => c.id));
+  const eventful = (ch: Pick<ChannelPrint, 'kind' | 'timescale'>) =>
+    ch.timescale === 'fast' || Object.hasOwn(KIND_FX, ch.kind);
+  let chosen = channels.filter((ch) => owners.has(ch.id) && eventful(ch));
+  // No owner with events of its own: the owner best suited, if it is not a slow one.
+  if (chosen.length === 0 && partition) {
+    const best = channels.find((c) => c.id === partition.owners['space.fx'][0]);
+    chosen = best && best.timescale !== 'slow' ? [best] : [];
+  }
+  return chosen.map((ch) => {
+    const own = Object.hasOwn(KIND_FX, ch.kind) ? KIND_FX[ch.kind] : undefined;
+    const fx =
+      own && effects.includes(own)
+        ? own
+        : (effects[hashInts(hashString(ch.kind), chain) % effects.length] as FxId);
+    return { channelId: ch.id, fx };
+  });
+}
+
+function chooseMachines(
+  palette: Palette,
+  rng: Rng,
+): { slot: string; machineId: string; option: number }[] {
   const [lo, hi] = palette.trackCount;
   const count = rng.int(lo, hi);
   const chosen = palette.slots.filter((s) => s.required);
@@ -174,75 +232,154 @@ function chooseMachines(palette: Palette, rng: Rng): { slot: string; machineId: 
   }
   // Keep the palette's order so the tracks list reads drums first, then bass, …
   chosen.sort((a, b) => palette.slots.indexOf(a) - palette.slots.indexOf(b));
-  return chosen.map((s, i) => ({ slot: `t${i + 1}`, machineId: rng.pick(s.machines) }));
+  return chosen.map((s, i) => ({
+    slot: `t${i + 1}`,
+    machineId: rng.pick(s.machines),
+    option: palette.slots.indexOf(s),
+  }));
 }
 
-/** Destination kinds a sensor drives, by how fast it changes. */
-const STRUCTURAL: Record<Timescale, readonly string[]> = {
-  fast: ['prob', 'retrig', 'decay', 'level', 'micro'],
-  medium: ['prob', 'tune', 'micro', 'lfo.rate', 'retrig'],
-  slow: ['chaos', 'g.swing', 'g.tension', 'lfo.rate', 'prob'],
-};
-const TIMBRAL: readonly TrackParam[] = [
-  'cutoff',
-  'timbre',
-  'drive',
-  'reso',
-  'pan',
-  'sendReverb',
-  'sendDelay',
-  'decay',
-  'attack',
-];
 const RHYTHMIC_ROLES: readonly TrackRole[] = ['drum', 'bass', 'lead', 'arp', 'chords'];
 const CURVE_WEIGHTS = [0.5, 0.2, 0.15, 0.15];
+/** Most a sensor route may move, for sensors with many areas (so one sensor alone stays musical). */
+const WIDE_ROUTE_MAX = 0.7;
+
+/** Track params and global destinations that read better pushed up than pulled down by a fast sensor. */
+const UPWARD = new Set(['prob', 'level', 'retrig']);
 
 /**
- * Writes the modulation matrix. Every live sensor gets at least two strong
- * routes, one changing what is played and one changing how it sounds, on
- * tracks the genome picks; LFOs, chaos maps, trig envelopes and macros add
- * internal routes, some of them in feedback loops.
+ * One destination in an area, on the tracks there are: the drums' hits, the
+ * groove, the chords' tension, the melody's register, the sound of the drums
+ * or of the tonal tracks, the room, the effects, the LFOs, the form. Undefined
+ * when the area has nothing to move (no drums for the drums' areas, no lead
+ * or arp for the melody).
  */
-export function buildRoutes(rng: Rng, fp: Fingerprint, tracks: readonly TrackSpec[]): Route[] {
+export function areaDest(rng: Rng, area: Area, tracks: readonly TrackSpec[]): string | undefined {
+  const of = (roles: readonly TrackRole[]) => tracks.filter((t) => roles.includes(t.role));
+  const drums = of(['drum']);
+  const tonal = tracks.filter((t) => t.role !== 'drum');
+  const melody = of(['lead', 'arp']);
+  const pick = (pool: readonly TrackSpec[]) => (pool.length > 0 ? rng.pick(pool).slot : undefined);
+  const on = (pool: readonly TrackSpec[], param: TrackParam) => {
+    const slot = pick(pool);
+    return slot === undefined ? undefined : trackDest(slot, param);
+  };
+  switch (area) {
+    case 'rhythm.drums':
+      return on(drums, rng.pick<TrackParam>(['prob', 'prob', 'retrig', 'micro']));
+    case 'rhythm.groove': {
+      const groove = of(['bass', 'chords']);
+      return rng.chance(0.35) || groove.length === 0
+        ? globalDest('swing')
+        : on(groove, rng.pick<TrackParam>(['prob', 'micro']));
+    }
+    case 'harmony.chords': {
+      const chordal = of(['chords', 'pad', 'bass', 'drone']);
+      return rng.chance(0.6) || chordal.length === 0 ? globalDest('tension') : on(chordal, 'tune');
+    }
+    case 'harmony.melody':
+      return on(melody, rng.pick<TrackParam>(['tune', 'prob', 'micro']));
+    case 'sound.drums':
+      return on(drums, rng.pick<TrackParam>(['cutoff', 'decay', 'tune', 'drive', 'timbre']));
+    case 'sound.tonal':
+      return on(
+        tonal,
+        rng.pick<TrackParam>(['cutoff', 'timbre', 'drive', 'reso', 'attack', 'decay']),
+      );
+    case 'space.room':
+      return rng.chance(0.3)
+        ? globalDest('space')
+        : on(tracks, rng.pick<TrackParam>(['sendReverb', 'sendDelay']));
+    case 'space.fx':
+      return rng.chance(0.4) ? globalDest('fx') : on(tracks, 'pan');
+    case 'motion.lfo':
+      return rng.chance(0.3)
+        ? chaosDest(rng.chance(0.5) ? 'a' : 'b')
+        : lfoDest(rng.pick(tracks).slot, rng.chance(0.6) ? 'rate' : 'depth');
+    case 'motion.form':
+      return on(tracks, 'level');
+  }
+}
+
+/** Fine destinations for a sensor's raw digits, by area: which tracks, which params. */
+const JITTER: Partial<
+  Record<Area, { roles?: readonly TrackRole[]; params: readonly TrackParam[] }>
+> = {
+  'rhythm.drums': { roles: ['drum'], params: ['micro'] },
+  'rhythm.groove': { roles: ['bass', 'chords'], params: ['micro'] },
+  'harmony.melody': { roles: ['lead', 'arp'], params: ['micro'] },
+  'sound.drums': { roles: ['drum'], params: ['timbre', 'cutoff'] },
+  'sound.tonal': {
+    roles: ['bass', 'lead', 'arp', 'chords', 'pad', 'drone'],
+    params: ['timbre', 'cutoff'],
+  },
+  'space.fx': { params: ['pan'] },
+};
+
+/**
+ * Writes the modulation matrix. Every live sensor gets one strong route per
+ * area it controls (at least two, to different places): a sensor alone
+ * moves everything, several each move their own part. A channel's routes
+ * come from its own stream, so another sensor joining does not move them.
+ * LFOs, chaos maps, trig envelopes and macros add internal routes, some of
+ * them in feedback loops.
+ */
+export function buildRoutes(
+  rng: Rng,
+  fp: Fingerprint,
+  tracks: readonly TrackSpec[],
+  partition?: Partition,
+): Route[] {
   const routes: Route[] = [];
   if (tracks.length === 0) return routes;
   const rhythmic = tracks.filter((t) => RHYTHMIC_ROLES.includes(t.role));
   const pickTrack = (pool: readonly TrackSpec[]) => rng.pick(pool.length > 0 ? pool : tracks);
-  const curve = (): Curve => CURVES[rng.weightedIndex(CURVE_WEIGHTS)] as Curve;
-  const strong = () => rng.range(SENSOR_ROUTE_MIN + 0.05, 0.9);
+  const curve = (r: Rng = rng): Curve => CURVES[r.weightedIndex(CURVE_WEIGHTS)] as Curve;
+  const salt = rng.int(0, 2 ** 31 - 1);
 
   for (const ch of fp.channels) {
-    const [f1, f2] = featuresFor(rng, ch);
-    // Structural: what is played.
-    const kind = rng.pick(STRUCTURAL[ch.timescale]);
-    const track = pickTrack(
-      kind === 'prob' || kind === 'retrig' || kind === 'micro' ? rhythmic : tracks,
-    );
-    const positive = ch.timescale === 'fast' && (kind === 'prob' || kind === 'level');
-    const sign = positive ? (rng.chance(0.75) ? 1 : -1) : rng.chance(0.5) ? 1 : -1;
-    routes.push({
-      source: sensorSource(ch.id, f1),
-      dest: structuralDest(rng, kind, track.slot),
-      amount: sign * strong(),
-      curve: curve(),
+    const r = new Rng(hashInts(salt, hashString(ch.id)));
+    const areas = partition?.channels[ch.id] ?? AREAS;
+    const hi = areas.length > 4 ? WIDE_ROUTE_MAX : 0.9;
+    const strong = () => r.range(SENSOR_ROUTE_MIN + 0.05, hi);
+    const [f1, f2] = featuresFor(r, ch);
+    const dests = new Set<string>();
+    const add = (area: Area, feature: SensorFeature) => {
+      let dest = areaDest(r, area, tracks);
+      for (let tries = 0; dest !== undefined && dests.has(dest) && tries < 4; tries++) {
+        dest = areaDest(r, area, tracks);
+      }
+      if (dest === undefined || dests.has(dest)) return;
+      dests.add(dest);
+      const param = dest.slice(dest.lastIndexOf('.') + 1);
+      const up = ch.timescale === 'fast' && UPWARD.has(param);
+      const sign = up ? (r.chance(0.75) ? 1 : -1) : r.chance(0.5) ? 1 : -1;
+      routes.push({
+        source: sensorSource(ch.id, feature),
+        dest,
+        amount: sign * strong(),
+        curve: curve(r),
+      });
+    };
+    areas.forEach((area, i) => add(area, i === 0 ? f1 : f2));
+    // At least two strong routes: more in its own areas, else the rest of its domains, else anywhere.
+    const domains = new Set(areas.map(domainOf));
+    const wider = AREAS.filter((a) => domains.has(domainOf(a)));
+    for (const pool of [areas, wider, AREAS]) {
+      for (let guard = 0; dests.size < 2 && guard < 8; guard++) add(r.pick(pool), f2);
+    }
+    // The finest grain: the digits of the reading nudge one more thing, in its own areas.
+    const fine = areas.flatMap((a) => {
+      const j = JITTER[a];
+      const pool = j ? tracks.filter((t) => !j.roles || j.roles.includes(t.role)) : [];
+      return j && pool.length > 0 ? [{ pool, params: j.params }] : [];
     });
-    // Timbral: how it sounds, on another track when there is one.
-    const other = tracks.length > 1 ? pickTrack(tracks.filter((t) => t !== track)) : track;
-    routes.push({
-      source: sensorSource(ch.id, f2),
-      dest: trackDest(other.slot, rng.pick(TIMBRAL)),
-      amount: (rng.chance(0.5) ? 1 : -1) * strong(),
-      curve: curve(),
-    });
-    // The finest grain: the digits of the reading nudge one more thing.
-    if (rng.chance(0.5)) {
+    if (fine.length > 0 && r.chance(0.5)) {
+      const { pool, params } = r.pick(fine);
       routes.push({
         source: sensorSource(ch.id, 'jitter'),
-        dest: trackDest(
-          pickTrack(tracks).slot,
-          rng.pick<TrackParam>(['micro', 'timbre', 'pan', 'cutoff']),
-        ),
-        amount: (rng.chance(0.5) ? 1 : -1) * rng.range(0.08, 0.25),
+        dest: trackDest(r.pick(pool).slot, r.pick(params)),
+        amount: (r.chance(0.5) ? 1 : -1) * r.range(0.08, 0.25),
         curve: 'lin',
       });
     }
@@ -349,21 +486,6 @@ function featuresFor(rng: Rng, ch: ChannelPrint): [SensorFeature, SensorFeature]
       return [rng.chance(0.25) ? 'trend' : 'level', 'level'];
     case 'slow':
       return ['level', 'level'];
-  }
-}
-
-function structuralDest(rng: Rng, kind: string, slot: string): string {
-  switch (kind) {
-    case 'lfo.rate':
-      return lfoDest(slot, 'rate');
-    case 'chaos':
-      return chaosDest(rng.chance(0.5) ? 'a' : 'b');
-    case 'g.swing':
-      return globalDest('swing');
-    case 'g.tension':
-      return globalDest('tension');
-    default:
-      return trackDest(slot, kind as TrackParam);
   }
 }
 

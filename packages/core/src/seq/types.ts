@@ -1,6 +1,7 @@
 import type { FxId } from '../fx/effects';
 import type { LfoSpec } from '../mod/lfo';
 import type { TrackParam, TrackParams } from '../mod/params';
+import type { RhythmHint } from '../styles/schema';
 
 /** What a track plays. Decides how its trigs are turned into notes. `fx` is the effects lane. */
 export type TrackRole = 'drum' | 'bass' | 'lead' | 'arp' | 'chords' | 'pad' | 'drone' | 'fx';
@@ -98,9 +99,38 @@ export interface TrackSpec {
   fifth?: boolean;
   /** Leads may use blue notes. */
   blueNotes?: boolean;
+  /**
+   * Which of the palette's slots the track fills (its index in
+   * `palette.slots`): what a track is, whatever slot id it holds. Evolution
+   * matches tracks by it.
+   */
+  option?: number;
+  /** The rhythm template its pattern follows, if any (four on the floor, …). */
+  rhythm?: RhythmHint;
 }
 
 export const MAX_TRACK_LENGTH = 64;
+
+export function cloneTrig(t: Trig): Trig {
+  return {
+    ...t,
+    cond: { ...t.cond },
+    ...(t.note ? { note: { ...t.note } } : {}),
+    ...(t.retrig ? { retrig: { ...t.retrig } } : {}),
+    ...(t.locks ? { locks: { ...t.locks } } : {}),
+  };
+}
+
+/** A deep copy of a track: edits and mutations of the copy leave the original alone. */
+export function cloneTrack(t: TrackSpec): TrackSpec {
+  return {
+    ...t,
+    trigs: t.trigs.map((trig) => (trig ? cloneTrig(trig) : undefined)),
+    base: { ...t.base },
+    range: [t.range[0], t.range[1]],
+    lfo: { ...t.lfo },
+  };
+}
 export const TRACK_SCALES: readonly number[] = [0.5, 0.75, 1, 1.5, 2];
 
 /** Compact label of a condition, as shown on the step grid (`1:2`, `fill`, `!pre`). */

@@ -11,6 +11,13 @@ export const jazz: Style = {
   description:
     'Swung ride and brushes, walking bass, comping piano, vibraphone; ii–V–I and turnarounds.',
   defaultTempo: 132,
+  drift: {
+    harmony: 1.6,
+    pattern: 1.1,
+    sound: 0.7,
+    machine: 0.8,
+    roles: { lead: 1.5, chords: 1.3 },
+  },
   palette: {
     modes: ['ionian'],
     progression: { 0: { 0: 1 } },
