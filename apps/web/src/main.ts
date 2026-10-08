@@ -520,6 +520,8 @@ const flow = new FlowView(
 type Mode = 'play' | 'flow' | 'lab';
 let mode: Mode = 'play';
 function setMode(next: Mode): void {
+  // The tabs stay in view in the header: a new page opens at its top.
+  if (next !== mode) window.scrollTo(0, 0);
   mode = next;
   for (const m of ['play', 'flow', 'lab'] as const) {
     $(`mode-${m}`).setAttribute('aria-pressed', String(mode === m));

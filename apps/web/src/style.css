@@ -54,7 +54,8 @@
 
   --radius: 6px;
   --radius-panel: 12px;
-  --scan: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.2) 0 1px, transparent 1px 3px);
+  /* Scan lines as a 3px tile: painted once and repeated, cheap even on a big window. */
+  --scan: linear-gradient(rgba(0, 0, 0, 0.11) 1px, transparent 1px) 0 0 / 100% 3px;
   color-scheme: dark;
 }
 
@@ -75,7 +76,6 @@ body {
   /* A faint warm glow from the top, like a monitor lighting the room. */
   background:
     radial-gradient(1100px 520px at 50% -8%, rgba(255, 160, 60, 0.09), transparent 62%), var(--bg);
-  background-attachment: fixed;
   color: var(--ink);
   font: 15px/1.5 var(--font-body);
   padding: env(safe-area-inset-top, 0px) 16px env(safe-area-inset-bottom, 0px);
@@ -139,8 +139,7 @@ select {
   flex-wrap: wrap;
   margin-inline: -16px;
   padding: 14px 16px 12px;
-  background: linear-gradient(180deg, rgba(11, 8, 5, 0.96) 70%, rgba(11, 8, 5, 0.82));
-  backdrop-filter: blur(6px);
+  background: linear-gradient(180deg, var(--bg) 70%, #0e0a06);
   border-bottom: 1px solid var(--line);
 }
 
@@ -255,8 +254,7 @@ select {
 /* Windows: warm glass with faint scan lines. ------------------------------- */
 .panel {
   position: relative;
-  isolation: isolate;
-  background: linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
+  background: var(--scan), linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   box-shadow:
@@ -267,17 +265,6 @@ select {
   gap: 14px;
   align-content: start;
   min-width: 0;
-}
-
-.panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  background: var(--scan);
-  opacity: 0.55;
-  pointer-events: none;
 }
 
 h2 {
@@ -626,7 +613,7 @@ input[type='checkbox'] {
   max-width: calc(100% - 16px);
   border-radius: 6px;
   background:
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 3px),
+    linear-gradient(rgba(0, 0, 0, 0.14) 1px, transparent 1px) 0 0 / 100% 3px,
     radial-gradient(120% 120% at 50% 45%, transparent 62%, rgba(0, 0, 0, 0.4) 100%);
 }
 

@@ -210,3 +210,14 @@ test('Stop while Start over is starting the audio stops the music', async ({ pag
   await expect(page.locator('#play')).toHaveAttribute('aria-label', 'Play');
   await expect(page.locator('#now-key')).toHaveText('Stopped');
 });
+
+test('the tabs stay in view, and a new page opens at its top', async ({ page }) => {
+  await page.goto('/');
+  // Down at the sources, the header and its tabs are still there.
+  await page.locator('#sources').scrollIntoViewIfNeeded();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(200);
+  await expect(page.locator('#mode-flow')).toBeInViewport();
+  await page.locator('#mode-flow').click();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.locator('.flow-panel')).toBeInViewport();
+});
