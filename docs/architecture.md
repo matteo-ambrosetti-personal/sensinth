@@ -433,8 +433,9 @@ with its audio time and the UI shows the one that is sounding.
 - **Tracks** (`ui/tracks.ts`): one row per track with its machine, length and speed, its own
   scope, a step grid (trigs shaded by velocity, p-lock dots, dashed outlines and labels for
   conditions and probabilities, retrig ticks, micro-timing offsets, the playhead), live param
-  meters with the genome's base value marked, and Mute. The FX lane shows its effects in the
-  cells, a legend, and the effect sounding now.
+  meters with the genome's base value marked, and Mute. A row a short track does not fill goes
+  on in faint outlines past its end. The FX lane shows its effects in the cells, a legend of
+  every effect (those in its pattern lit, the one sounding marked), and the effect sounding now.
 - **Modulation** (`ui/matrix.ts`): every route grouped by source, with its amount and a centered
   bar showing what it adds right now.
 - **Flow** (`ui/flow/`): the signal path as a live diagram. Cards in four columns — sensors (a raw

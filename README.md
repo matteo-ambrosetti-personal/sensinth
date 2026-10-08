@@ -256,13 +256,15 @@ device_. With every source off, Play waits for one.
 - **The screen** plays the music with a little pixel band, one scene per style.
 - **Drift** draws how far the piece has come from where it started, bar by bar: a thin line per
   track in its colour, a thick white line for the whole piece, ticks for sections and ★ for a new
-  scene.
-- **Who drives what** shows every source that is on, the areas it controls and which of its
-  sensors does which; the dials and the live sensors carry the same colours.
+  scene. The top of the chart is the farthest the piece has gone, so the lines use its height.
+- **Who drives what** is a table with a row for every source that is on: the areas it controls
+  and which of its sensors does which, each area with its colour; the dials and the live sensors
+  carry the same colours.
 - **Tracks** shows each track as it plays: its machine, length and speed, how far it has
   drifted, its own waveform, its steps (brighter = louder, a magenta dot = its own sound on this
-  step, a dashed outline and label = it plays only sometimes, ticks = a roll, a white box = now)
-  and its live parameters, where the bar is the value now and the tick is the track's own value.
+  step, a dashed outline and label = it plays only sometimes, ticks = a roll, a white box = now;
+  past a track's last step its row goes on in faint outlines, as it loops) and its live
+  parameters, where the bar is the value now and the tick is the track's own value.
   The legend above the tracks says the same. **Mute** silences a track without changing where
   the music goes. **Every routing** lists every route, grouped by source, with a bar showing what
   it adds right now. The status bar under the console shows the section, the genome's id, where

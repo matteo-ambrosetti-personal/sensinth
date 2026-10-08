@@ -126,14 +126,17 @@ export class TracksView {
       playing.length > 0 ? playing.map((f) => FX_INFO[f].label).join(' + ') : 'No effect';
     if (now.textContent !== text) now.textContent = text;
     now.classList.toggle('is-on', playing.length > 0);
-    const used = [...new Set(t.trigs.flatMap((x) => (x?.fx ? [x.fx] : [])))];
-    const key = used.join(',');
+    // Every effect the lane can fire, the ones in its pattern lit, the one playing marked.
+    const used = new Set(t.trigs.flatMap((x) => (x?.fx ? [x.fx] : [])));
+    const key = `${[...used].join(',')}|${playing.join(',')}`;
     if (legend.dataset.key === key) return;
     legend.dataset.key = key;
     legend.replaceChildren(
-      ...used.map((f) => {
+      ...(Object.keys(FX_INFO) as FxId[]).map((f) => {
         const li = document.createElement('li');
         li.title = FX_INFO[f].description;
+        li.classList.toggle('is-used', used.has(f));
+        li.classList.toggle('is-on', playing.includes(f));
         li.innerHTML = `<span class="param-name"></span><span class="fx-name"></span>`;
         (li.firstElementChild as HTMLElement).textContent = FX_INFO[f].short;
         (li.lastElementChild as HTMLElement).textContent = FX_INFO[f].label;
@@ -264,6 +267,20 @@ export class TracksView {
         ctx.strokeStyle = c.ink;
         ctx.lineWidth = 2;
         ctx.strokeRect(x + 1, y + 1, cell - 2, cell - 2);
+      }
+    }
+    // Past its end the track loops: the rest of the row is drawn as faint
+    // outlines after a tick in the track's colour, so every grid spans its row.
+    if (t.length % COLUMNS !== 0) {
+      const x0 = (t.length % COLUMNS) * (cell + gap);
+      const y0 = (rows - 1) * rowH;
+      ctx.fillStyle = c.accent;
+      ctx.fillRect(Math.round(x0 - gap / 2 - 1), y0, 2, cell);
+      ctx.strokeStyle = c.grid;
+      ctx.lineWidth = 1;
+      for (let i = t.length; i < rows * COLUMNS; i++) {
+        const x = (i % COLUMNS) * (cell + gap);
+        ctx.strokeRect(Math.round(x) + 0.5, y0 + 0.5, Math.round(cell) - 1, Math.round(cell) - 1);
       }
     }
     const label = `${t.slot.toUpperCase()} ${t.label}: ${t.length} steps, ${placed} trigs, ${conditional} with conditions or probability, ${locked} with parameter locks`;

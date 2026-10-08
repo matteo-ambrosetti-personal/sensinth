@@ -206,11 +206,15 @@ export class Stage {
       const dpr = window.devicePixelRatio || 1;
       const k = Math.min(Math.floor(5 * dpr), Math.floor((box * dpr) / STAGE_W));
       const width = k >= 2 ? (STAGE_W * k) / dpr : Math.max(1, box);
+      if (canvas.style.width === `${width}px`) return;
       canvas.style.width = `${width}px`;
       // The bezel and the banner hug the picture, whatever its scale.
       screen?.style.setProperty('--stage-w', `${width}px`);
     };
-    if (canvas.parentElement) new ResizeObserver(fit).observe(canvas.parentElement);
+    // The picture's size changes the screen's height: refit on the next frame, not
+    // inside the observer, or the observer reports a loop.
+    if (canvas.parentElement)
+      new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas.parentElement);
     // Zooming or moving to another screen changes the device pixel ratio.
     window.addEventListener('resize', fit);
     fit();

@@ -981,31 +981,46 @@ input[type='checkbox'] {
 }
 
 /* Who drives what --------------------------------------------------------- */
+/* A table: one row per source, its name, its areas, then its sensors. Each row is
+   as tall as its own content, so no source is stretched to a neighbour. */
 .areas {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* Sources share each row out between them, so the map has no holes at any count. */
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: fit-content(190px) fit-content(340px) minmax(0, 1fr);
+  column-gap: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.areas:empty {
+  display: none;
 }
 
 .area-group {
-  flex: 1 1 250px;
+  grid-column: 1 / -1;
   display: grid;
-  gap: 7px;
-  align-content: start;
-  padding: 10px 11px;
+  grid-template-columns: subgrid;
+  align-items: start;
+  padding: 10px 12px;
   background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+}
+
+.area-group:nth-child(even) {
+  background: rgba(255, 179, 71, 0.035);
+}
+
+.area-group + .area-group {
+  border-top: 1px solid var(--line);
 }
 
 .area-source {
   font: 600 12px/1.4 var(--font-display);
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  padding-top: 2px;
 }
 
 .area-chips {
@@ -1024,34 +1039,74 @@ input[type='checkbox'] {
   border: 1px solid color-mix(in srgb, var(--area) 45%, transparent);
 }
 
-.area-chip[data-domain='rhythm'] {
+:is(.area-chip, .ac-area)[data-domain='rhythm'] {
   --area: var(--a-rhythm);
 }
 
-.area-chip[data-domain='harmony'] {
+:is(.area-chip, .ac-area)[data-domain='harmony'] {
   --area: var(--a-harmony);
 }
 
-.area-chip[data-domain='sound'] {
+:is(.area-chip, .ac-area)[data-domain='sound'] {
   --area: var(--a-sound);
 }
 
-.area-chip[data-domain='space'] {
+:is(.area-chip, .ac-area)[data-domain='space'] {
   --area: var(--a-space);
 }
 
-.area-chip[data-domain='motion'] {
+:is(.area-chip, .ac-area)[data-domain='motion'] {
   --area: var(--a-motion);
 }
 
 .area-channels {
   margin: 0;
-  padding: 0;
+  padding: 2px 0 0;
   list-style: none;
-  font: 400 12px/1.35 var(--font-mono);
+  font: 400 12px/1.45 var(--font-mono);
   color: var(--muted);
-  display: grid;
-  gap: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 18px;
+}
+
+.ac-name {
+  color: var(--ink);
+}
+
+.ac-area {
+  --area: var(--muted);
+  white-space: nowrap;
+}
+
+.ac-area::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--area);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--area) 60%, transparent);
+}
+
+/* On a phone the name and the areas share a line, the sensors go under them. */
+@media (max-width: 560px) {
+  .areas {
+    display: block;
+  }
+
+  .area-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+  }
+
+  .area-channels {
+    flex-basis: 100%;
+  }
 }
 
 /* Tracks ------------------------------------------------------------------ */
@@ -1120,6 +1175,11 @@ input[type='checkbox'] {
 .gl-head {
   outline: 2px solid var(--ink);
   outline-offset: -2px;
+}
+
+.grid-legend .gl-end {
+  background: transparent;
+  box-shadow: -3px 0 0 -1px var(--accent);
 }
 
 .tracks {
@@ -1261,8 +1321,28 @@ input[type='checkbox'] {
   --track: var(--muted);
 }
 
+/* Every effect the lane can fire, named in full, as many to a row as fit. */
+.track.is-fx .track-params {
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 3px 12px;
+}
+
 .track.is-fx .track-params li {
-  grid-template-columns: 2.6rem minmax(0, 1fr);
+  grid-template-columns: 2.1rem minmax(0, 1fr);
+  opacity: 0.45;
+}
+
+.track.is-fx .track-params li.is-used {
+  opacity: 1;
+}
+
+.track.is-fx .track-params li.is-used .fx-name {
+  color: var(--ink);
+}
+
+.track.is-fx .track-params li.is-on :is(.param-name, .fx-name) {
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--glow);
 }
 
 .fx-name {
@@ -2192,8 +2272,24 @@ input[type='checkbox'] {
     grid-template-columns: 290px 164px minmax(190px, 240px) 172px;
     justify-content: space-between;
     column-gap: 36px;
-    align-items: start;
+    align-items: stretch;
     padding-left: 0;
+  }
+
+  /* Every column is as tall as the longest: the shorter ones spread their cards
+     down it, so the links fan out over the whole diagram and none ends early. */
+  .flow-col {
+    grid-template-rows: auto 1fr;
+  }
+
+  .flow-mods,
+  .flow-tracks,
+  .flow-buses {
+    align-content: space-evenly;
+  }
+
+  .flow-sensors {
+    align-content: start;
   }
 }
 

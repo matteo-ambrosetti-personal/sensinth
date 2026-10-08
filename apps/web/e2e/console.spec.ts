@@ -76,6 +76,10 @@ test('one source drives everything; two share it out', async ({ page }) => {
   expect(a.length + b.length).toBe(10);
   expect(a.filter((x) => b.includes(x))).toEqual([]);
   await expect(page.locator('#areas-note')).toContainText('its own part');
+  // A source with one sensor still says which sensor moves what.
+  const keyboard = page.locator('#areas .area-group[data-group="keyboard"]');
+  await expect(keyboard.locator('.area-channels li')).toHaveCount(1);
+  await expect(keyboard.locator('.area-channels li')).toContainText('→');
 });
 
 test('a key press says what it will do, then lands at the next bar', async ({ page }) => {

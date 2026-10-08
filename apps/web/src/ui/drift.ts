@@ -1,10 +1,11 @@
 import type { EngineView } from '@sensinth/core';
+import { Gfx } from './stage/gfx';
 import { theme, trackColor } from './theme';
 
 /** Drawn at half the screen's resolution and scaled up, for chunky pixels. */
 const PIXEL = 2;
-/** Bars always shown, so the first minutes do not stretch across the chart. */
-const MIN_BARS = 32;
+/** Bars always shown, so the first few do not stretch across the whole chart. */
+const MIN_BARS = 8;
 /** Bars kept: the engine's own window. Older bars scroll off the left. */
 const MAX_BARS = 512;
 
@@ -88,6 +89,15 @@ export class DriftChart {
     this.lastBar = -1;
   }
 
+  /** The farthest the piece, or any of its tracks, has gone so far. */
+  private peak(): number {
+    let peak = 0;
+    for (const v of this.total) if (v !== undefined && v > peak) peak = v;
+    for (const s of this.tracks.values())
+      for (const v of s.values) if (v !== undefined && v > peak) peak = v;
+    return Math.min(1, peak);
+  }
+
   /** Keeps the last `MAX_BARS` bars, so a long piece's redraw stays quick. */
   private trim(): void {
     const n = this.total.length - MAX_BARS;
@@ -111,16 +121,30 @@ export class DriftChart {
     const bottom = h - 6;
     const left = 2;
     const bars = Math.max(MIN_BARS, this.total.length);
+    // The top of the chart is the farthest the piece has gone, to the next quarter:
+    // the drift of a piece mostly stays low, and should still fill the chart.
+    const scale = Math.max(0.25, Math.ceil(this.peak() / 0.25 - 1e-9) * 0.25);
     const xOf = (bar: number) => left + Math.round((bar / (bars - 1)) * (w - left - 3));
-    const yOf = (v: number) => Math.round(bottom - Math.max(0, Math.min(1, v)) * (bottom - top));
+    const yOf = (v: number) =>
+      Math.round(bottom - Math.max(0, Math.min(1, v / scale)) * (bottom - top));
 
-    // Grid: quarters of the way.
+    // Grid: quarters of the way to the top.
     ctx.fillStyle = t.line;
     for (const f of [0.25, 0.5, 0.75]) {
-      const y = yOf(f);
+      const y = yOf(f * scale);
       for (let x = left; x < w; x += 3) ctx.fillRect(x, y, 1, 1);
     }
     ctx.fillRect(left, bottom + 1, w - left, 1);
+    const g = new Gfx(ctx, w, h);
+    if (this.total.length === 0) {
+      const text = 'Press play · the drift draws here';
+      const x = Math.round((w - g.textWidth(text)) / 2);
+      const y = Math.round(h / 2 - 3);
+      g.rect(x - 4, y - 3, g.textWidth(text) + 8, 11, '#000');
+      g.text(text, x, y, t.muted);
+      return;
+    }
+    g.text(`${Math.round(scale * 100)}%`, left + 2, top + 1, t.muted);
 
     // Marks under the axis: sections, scenes, edits, evolutions.
     for (const m of this.marks) {

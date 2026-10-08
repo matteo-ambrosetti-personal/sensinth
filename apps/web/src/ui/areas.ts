@@ -23,8 +23,8 @@ const LEVEL_NOTE: Record<PartitionView['level'], string> = {
 };
 
 /**
- * Who drives what: every source that is on, with the areas of the music it
- * controls, and under it which of its sensors does which.
+ * Who drives what: a row for every source that is on, with the areas of the
+ * music it controls and which of its sensors does which.
  */
 export class AreasView {
   private shown: PartitionView | undefined;
@@ -52,17 +52,25 @@ export class AreasView {
         const name = document.createElement('span');
         name.className = 'area-source';
         name.textContent = this.sourceName(g.group);
-        li.append(name, areaChips(g.areas));
-        if (g.channels.length > 1) {
-          const ul = document.createElement('ul');
-          ul.className = 'area-channels';
-          for (const ch of g.channels) {
-            const item = document.createElement('li');
-            item.textContent = `${ch.label}: ${ch.areas.map((a) => AREA_INFO[a].label).join(', ')}`;
-            ul.append(item);
-          }
-          li.append(ul);
+        // Every sensor of the source, with the areas it moves, each by its colour.
+        const ul = document.createElement('ul');
+        ul.className = 'area-channels';
+        for (const ch of g.channels) {
+          const item = document.createElement('li');
+          const label = document.createElement('span');
+          label.className = 'ac-name';
+          label.textContent = ch.label;
+          item.append(label, ' → ');
+          ch.areas.forEach((a, i) => {
+            const area = document.createElement('span');
+            area.className = 'ac-area';
+            area.dataset.domain = domainOf(a);
+            area.textContent = AREA_INFO[a].label;
+            item.append(...(i > 0 ? [', ', area] : [area]));
+          });
+          ul.append(item);
         }
+        li.append(name, areaChips(g.areas), ul);
         return li;
       }),
     );
