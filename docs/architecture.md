@@ -93,12 +93,16 @@ bonus for what a holder had before, so a new source moves as little as possible.
 by id: the result never depends on the order channels come in.
 
 The engine recomputes it whenever the set of live channels changes (in deterministic mode: the
-channels in the input log) and exposes it as `view.partition`. `buildRoutes` gives each channel
+continuous sensors in the input log that have read, since keys, buttons and shakes act through
+their presses wherever they are) and exposes it as `view.partition`. Each new share sticks to the
+last one of every live channel, so a Sensor lab solo, which hands one channel everything, leaves
+no trace once it ends. `buildRoutes` gives each channel
 one strong route per owned area (`areaDest`) from its own random stream, so another sensor
 joining does not reshuffle it; `fxTriggers` come from the owners of `space.fx`; `mutateRoute`
 moves a sensor route only to a destination in its owner's areas (`destArea`); deterministic
 mode's continuous sensors keep their kind's effect when they own its domain, else pick one from
-an owned domain.
+an owned domain (never an instrument change while the instruments are fixed), and follow the
+share when it changes.
 
 ## Sensors reach the music four ways at once
 
@@ -255,6 +259,8 @@ fixed way.
   of zones from there (the short way round for circular sensors, whose hysteresis band wraps
   too), so the seed's own song plays until something moves. `sensors: 'off'` keeps the zone
   meters but counts nothing. A channel that goes away (`InputModel.takeRemoved`) stops counting.
+  When another source comes or goes and a sensor's areas change, its zones move what it owns now,
+  from the next bar line, still counted from where it was at Play.
 - **What lands, and when.** Every edit carries a `description` and the `slots` it lands on
   (`describeEffect`, `effectTargets`); `SongView.pending` lists inputs registered but not yet
   applied, with the bar they land on. A numeric target past the last track does nothing unless
@@ -268,8 +274,9 @@ fixed way.
 - **Exact passes.** Notes carry `loopStep`; the renderer's humanize and the drums' noise offset
   hash it, so every pass of a loop sounds the same.
 - **Stalls.** `LookaheadScheduler` skips whole steps after a stall and reports how many;
-  `Engine.skip(n, dt)` moves the song's clock and position on and starts the loop over where it
-  is, so inputs keep being read on time. A press stamped before the last read counts at once
+  `Engine.skip(n, dt)` reads the inputs each skipped step would have read and does each skipped
+  bar line's work (edits, generation, style), then starts the loop over where the clock is, so the
+  song carries on as if it never stalled. A press stamped before the last read counts at once
   instead of never.
 
 The tests check exact loops in every style, a new song from the bar after a press and its loop,

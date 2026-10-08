@@ -539,14 +539,22 @@ export class Engine {
 
   /**
    * The clock skipped `steps` steps (the page stalled): deterministic mode
-   * moves its own clock and position on with it, so inputs keep being read
-   * on time. The sensor-driven mode just carries on.
+   * moves its own clock and position on with it, reading the inputs each
+   * skipped step would have read and turning the song at each skipped bar
+   * line, so it carries on as if it never stalled. The sensor-driven mode
+   * just carries on.
    */
   skip(steps: number, stepSeconds: number): void {
     const det = this.det;
     if (!det || steps <= 0) return;
-    this.step += steps;
-    det.clock += steps * stepSeconds;
+    for (let i = 0; i < steps; i++) {
+      const step = this.step++;
+      const t = det.origin + det.clock - det.delay;
+      det.clock += stepSeconds;
+      this.updatePartition(sharing(det, t));
+      this.readInputs(det, t);
+      if (step % STEPS_PER_BAR === 0) this.songBarLine(det, step, false);
+    }
     det.resync = true;
   }
 
@@ -698,53 +706,63 @@ export class Engine {
     this.waiting = false;
     const pos = step % (det.loopBars * STEPS_PER_BAR);
     det.pos = pos;
-    let restarted = false;
-    if (step % STEPS_PER_BAR === 0) {
-      let reason: RebuildReason | undefined = step === 0 ? 'start' : undefined;
-      if (this.pendingStyle) {
-        this.style = this.pendingStyle;
-        this.pendingStyle = undefined;
-        this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
-        det.base = baseSong(this.style, det.seed, det.loopBars);
-        if (det.evolve) det.evolve = { ...det.evolve, k: 0, spec: det.base };
-        reason ??= 'style';
-      }
-      // Evolve: a new generation starts on a loop start.
-      const ev = det.evolve;
-      if (ev) {
-        const k = Math.floor(Math.floor(step / STEPS_PER_BAR) / ev.bars);
-        if (k !== ev.k) reason ??= 'evolve';
-        while (ev.k < k) {
-          ev.k++;
-          ev.spec = evolveBase(ev.spec, ev.k, det.instruments);
-        }
-      }
-      const edits = det.tracker.edits();
-      const version = editsVersion(edits) + (ev && ev.k > 0 ? `.g${ev.k}` : '');
-      if (version !== det.version) reason ??= 'edit';
-      if (reason) {
-        const song = buildSong(ev?.spec ?? det.base, edits);
-        det.edits = edits.map((e) => ({ ...e, ...describeEdit(song, e) }));
-        det.version = version;
-        det.song = song;
-        this.genomeVersion++;
-        this.patternVersion++;
-        this.rebuildInfo = { reason, step };
-        this.markDrift(step, reason);
-        this.startLoop(det, pos);
-        restarted = true;
-      } else if (pos === 0) {
-        this.startLoop(det, 0);
-        restarted = true;
-      }
-      this.measureSongDrift(det, step);
-    }
+    const restarted = step % STEPS_PER_BAR === 0 && this.songBarLine(det, step, true);
     // After a stall the loop starts over where the clock now is.
     if (det.resync) {
       det.resync = false;
       if (!restarted) this.startLoop(det, pos);
     }
     return this.playSong(det, pos, step);
+  }
+
+  /**
+   * A bar line in deterministic mode: a style picked meanwhile, a new
+   * generation, or edits that changed turn the song into its new version.
+   * With `play`, the loop restarts at once (true when it did); a stall's
+   * skipped bar lines only turn the song, and the loop restarts after.
+   */
+  private songBarLine(det: Seeded, step: number, play: boolean): boolean {
+    const pos = step % (det.loopBars * STEPS_PER_BAR);
+    let restarted = false;
+    let reason: RebuildReason | undefined = step === 0 ? 'start' : undefined;
+    if (this.pendingStyle) {
+      this.style = this.pendingStyle;
+      this.pendingStyle = undefined;
+      this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
+      det.base = baseSong(this.style, det.seed, det.loopBars);
+      if (det.evolve) det.evolve = { ...det.evolve, k: 0, spec: det.base };
+      reason ??= 'style';
+    }
+    // Evolve: a new generation starts on a loop start.
+    const ev = det.evolve;
+    if (ev) {
+      const k = Math.floor(Math.floor(step / STEPS_PER_BAR) / ev.bars);
+      if (k !== ev.k) reason ??= 'evolve';
+      while (ev.k < k) {
+        ev.k++;
+        ev.spec = evolveBase(ev.spec, ev.k, det.instruments);
+      }
+    }
+    const edits = det.tracker.edits();
+    const version = editsVersion(edits) + (ev && ev.k > 0 ? `.g${ev.k}` : '');
+    if (version !== det.version) reason ??= 'edit';
+    if (reason) {
+      const song = buildSong(ev?.spec ?? det.base, edits);
+      det.edits = edits.map((e) => ({ ...e, ...describeEdit(song, e) }));
+      det.version = version;
+      det.song = song;
+      this.genomeVersion++;
+      this.patternVersion++;
+      this.rebuildInfo = { reason, step };
+      this.markDrift(step, reason);
+      if (play) this.startLoop(det, pos);
+      restarted = play;
+    } else if (pos === 0 && play) {
+      this.startLoop(det, 0);
+      restarted = true;
+    }
+    this.measureSongDrift(det, step);
+    return restarted;
   }
 
   /** How far the song playing is from the seed's own. */

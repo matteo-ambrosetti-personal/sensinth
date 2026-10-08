@@ -12,12 +12,15 @@ import {
   SensorHub,
   SensorRecorder,
   chiptune,
+  domainOf,
   keyCodeIndex,
   keyEffect,
   lofi,
   minimal,
+  sensorEffect,
   stepDuration,
   techno,
+  timescaleOf,
   zoneOf,
   type DeterministicOptions,
   type NoteEvent,
@@ -67,6 +70,8 @@ interface Script {
   presses?: readonly SensorEvent[];
   /** Called after every step with its notes. */
   onStep?: (events: readonly NoteEvent[], engine: Engine) => void;
+  /** The page stalls at step `at`: the clock jumps `steps` steps ahead. */
+  stall?: { at: number; steps: number };
 }
 
 interface Take {
@@ -92,14 +97,28 @@ function take(
   const presses = [...(script.presses ?? [])].sort((a, b) => a.t - b.t);
   const out: Take = { events: [], versions: [], keys: [], engine };
   let sampleT = 0;
-  for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
-    const t = step * dt;
+  const feed = (t: number) => {
     for (; sampleT <= t; sampleT = Math.round((sampleT + 0.05) * 1000) / 1000) {
       hub.pushAll(script.sampleAt?.(sampleT) ?? []);
       while (presses.length > 0 && (presses[0] as SensorEvent).t <= sampleT) {
         hub.emit(presses.shift() as SensorEvent);
       }
     }
+  };
+  for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
+    const stall = script.stall;
+    if (stall && step === stall.at) {
+      // What the sensors sent during the stall has arrived; then the clock jumps.
+      feed((step + stall.steps) * dt);
+      engine.skip(stall.steps, dt);
+      for (let s = step; s < step + stall.steps; s++) {
+        if (s % STEPS_PER_BAR !== 0) continue;
+        out.versions.push(engine.view().song?.version ?? '');
+        out.keys.push(engine.key);
+      }
+      step += stall.steps;
+    }
+    feed(step * dt);
     const events = engine.tick(dt);
     script.onStep?.(events, engine);
     out.events.push(...events);
@@ -119,6 +138,11 @@ function bars(events: readonly NoteEvent[], from: number, to: number): string[] 
   return events
     .filter((e) => e.step >= lo && e.step < hi)
     .map((e) => JSON.stringify({ ...e, step: e.step - lo }));
+}
+
+/** The notes from `step` on. */
+function after(events: readonly NoteEvent[], step: number): string[] {
+  return events.filter((e) => e.step >= step).map((e) => JSON.stringify(e));
 }
 
 /** Seconds at the middle of a bar. */
@@ -509,6 +533,97 @@ describe('Deterministic songs', () => {
     }
     engine.dispose();
     expect(bars(events, 3, 8)).toEqual(bars(whole.events, 3, 8));
+  });
+
+  it('catch up after a stall over a bar line: edits and generations land as if it never stalled', () => {
+    // A key pressed in bar 1 lands at bar 2, which the stall skips.
+    const o = { seed: 3, loopBars: 4 };
+    const presses = [key('KeyQ', (STEPS_PER_BAR + 4) * stepDuration(chiptune.defaultTempo))];
+    const whole = take(chiptune, 6, o, { presses });
+    const stalled = take(chiptune, 6, o, { presses, stall: { at: 28, steps: 8 } });
+    expect(whole.versions[2]).not.toBe('base');
+    expect(stalled.versions[2]).toBe(whole.versions[2]);
+    expect(after(stalled.events, 36)).toEqual(after(whole.events, 36));
+    // Evolve: the stall skips the start of generation 1 at bar 16.
+    const e = { seed: 9, loopBars: 4, evolve: true };
+    const grown = take(lofi, 20, e);
+    const late = take(lofi, 20, e, { stall: { at: 250, steps: 10 } });
+    expect(late.versions[16]).toBe('base.g1');
+    expect(after(late.events, 260)).toEqual(after(grown.events, 260));
+  });
+
+  it('count the zones a sensor crossed while the clock stalled', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'steps', repeat: 'accumulate' } as const;
+    const bar = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    // Tilted forward for half of bar 2, all of it inside the stall.
+    const script = {
+      descriptors: [TILT],
+      sampleAt: (t: number) => [{ id: TILT.id, t, v: t >= 2 * bar && t < 2.5 * bar ? 60 : 0 }],
+    };
+    const whole = take(chiptune, 8, o, script);
+    const stalled = take(chiptune, 8, o, { ...script, stall: { at: 30, steps: 14 } });
+    const edits = (t: Take) => t.engine.view().song?.edits.map((x) => `${x.input}×${x.count}`);
+    expect(edits(whole)).toEqual(['step:mac.pitch×4']);
+    expect(edits(stalled)).toEqual(edits(whole));
+    expect(after(stalled.events, 4 * STEPS_PER_BAR)).toEqual(
+      after(whole.events, 4 * STEPS_PER_BAR),
+    );
+  });
+
+  it('move a sensor to what it owns now when another source joins', () => {
+    const ROLL: SensorDescriptor = {
+      id: 'phone.roll',
+      kind: 'orientation.roll',
+      label: 'Roll',
+      group: 'motion',
+      range: [-90, 90],
+      rateHz: 50,
+    };
+    const joining: SensorDescriptor[] = [
+      { ...TILT, group: 'mac' },
+      {
+        id: 'cam.luma',
+        kind: 'camera.luma',
+        label: 'Camera brightness',
+        group: 'camera',
+        range: [0, 1],
+        rateHz: 10,
+      },
+    ];
+    const bar = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    let alone: string | undefined;
+    const t = take(
+      chiptune,
+      6,
+      { seed: 42, loopBars: 4 },
+      {
+        descriptors: [ROLL, ...joining],
+        // The others send nothing until bar 2.
+        sampleAt: (time) => [
+          { id: ROLL.id, t: time, v: 0 },
+          ...(time >= 2 * bar
+            ? [
+                { id: TILT.id, t: time, v: 0 },
+                { id: 'cam.luma', t: time, v: 0.5 },
+              ]
+            : []),
+        ],
+        onStep: (_events, engine) => {
+          if (engine.view().snapshot.step === STEPS_PER_BAR) {
+            alone = engine.view().song?.sensors.find((x) => x.id === ROLL.id)?.effect.id;
+          }
+        },
+      },
+    );
+    expect(alone).toBe('mode');
+    const view = t.engine.view();
+    const areas = view.partition.groups
+      .flatMap((g) => g.channels)
+      .find((c) => c.id === ROLL.id)?.areas;
+    const domains = [...new Set((areas ?? []).map(domainOf))];
+    expect(domains.length).toBeGreaterThan(0);
+    const now = view.song?.sensors.find((x) => x.id === ROLL.id)?.effect;
+    expect(now).toEqual(sensorEffect(ROLL, timescaleOf(ROLL), domains)?.effect);
   });
 
   it('hear the seed’s own song while sensors stay where they were at Play', () => {

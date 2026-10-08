@@ -51,6 +51,11 @@ export interface SensorZones {
   sensors: SensorMode;
 }
 
+/** A sensor effect as a string, to tell when a sensor's effect changes. */
+function effectKey(m: SensorEffect): string {
+  return `${JSON.stringify(m.effect)}${m.centered ? '~' : ''}`;
+}
+
 /** Zones a continuous sensor's range is split into. */
 export const ZONES = 5;
 /** How far past a zone's edge a reading must go before the zone changes. */
@@ -83,6 +88,8 @@ interface Pressed {
 interface Zoned {
   source: string;
   map: SensorEffect;
+  /** What it did at the first reading: steps count under `step:id` while it still does that. */
+  first: string;
   zone: number;
   /** The zone at the first reading (Play): being there changes nothing. */
   start: number;
@@ -139,6 +146,7 @@ export class EditTracker {
       this.zones.set(id, {
         source,
         map,
+        first: effectKey(map),
         zone,
         start: zone,
         circular,
@@ -148,10 +156,18 @@ export class EditTracker {
       this.version++;
       return;
     }
+    // The sensor's areas changed (another source came or went): its zones now
+    // move what it owns now, from the next bar line, counted from where it was at Play.
+    if (effectKey(map) !== effectKey(before.map)) {
+      before.map = map;
+      this.version++;
+    }
     if (zone === before.zone) return;
     if (before.sensors === 'steps') {
+      const key = effectKey(before.map);
+      const input = key === before.first ? `step:${id}` : `step:${id}:${key}`;
       for (let i = this.zonesApart(before, before.zone, zone); i > 0; i--) {
-        this.press(`step:${id}`, source, map.effect, before.repeat);
+        this.press(input, source, before.map.effect, before.repeat);
       }
     }
     before.zone = zone;
