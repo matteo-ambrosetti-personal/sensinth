@@ -105,9 +105,15 @@ class ChannelLog {
     return this.scale(v);
   }
 
-  /** Events with `from < t <= to`, dropping them from the log. */
+  /**
+   * Events up to `to`, dropping them from the log. One stamped at or before
+   * `from` arrived late (a slow timer, a throttled replay): it counts now
+   * rather than never.
+   */
   takeEvents(from: number, to: number): SensorEvent[] {
-    const out = this.events.filter((e) => e.t > from && e.t <= to);
+    const out = this.events
+      .filter((e) => e.t <= to)
+      .map((e) => (e.t > from ? e : { ...e, t: Math.min(to, Math.max(from, e.t)) }));
     this.events = this.events.filter((e) => e.t > to);
     return out;
   }
@@ -131,6 +137,8 @@ export class InputModel {
   readonly origin: number;
   private readonly logs = new Map<string, ChannelLog>();
   private readonly untap: () => void;
+  /** Channels removed since `takeRemoved` was last called. */
+  private removed: string[] = [];
 
   constructor(
     private readonly hub: SensorHub,
@@ -145,7 +153,9 @@ export class InputModel {
     }
     this.untap = hub.tap({
       announce: (desc) => this.logs.set(desc.id, new ChannelLog(desc)),
-      remove: (id) => this.logs.delete(id),
+      remove: (id) => {
+        if (this.logs.delete(id)) this.removed.push(id);
+      },
       push: (s) => {
         const log = this.logs.get(s.id);
         if (!log) return;
@@ -176,7 +186,22 @@ export class InputModel {
     return out;
   }
 
-  /** Presses and onsets with `from < t <= to`, in time order (ties by channel id). */
+  /** Channels that went away since the last call. */
+  takeRemoved(): string[] {
+    const out = this.removed;
+    this.removed = [];
+    return out;
+  }
+
+  /** Every channel in the log, sorted by id, with its timescale. */
+  channels(): { desc: SensorDescriptor; timescale: Timescale }[] {
+    return [...this.logs.keys()].sort().map((id) => {
+      const log = this.logs.get(id) as ChannelLog;
+      return { desc: log.desc, timescale: log.timescale };
+    });
+  }
+
+  /** Presses and onsets up to `to` (see `takeEvents`), in time order (ties by channel id). */
   presses(from: number, to: number): SensorEvent[] {
     const out: SensorEvent[] = [];
     for (const log of this.logs.values()) out.push(...log.takeEvents(from, to));

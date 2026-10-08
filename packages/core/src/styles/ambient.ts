@@ -9,6 +9,7 @@ export const ambient: Style = {
   name: 'Ambient',
   description: 'Drones under slow pads, sparse bells and deep reverb.',
   defaultTempo: 72,
+  drift: { sound: 1.6, harmony: 1.5, pattern: 0.6, motion: 1.4, rhythm: 0.5 },
   palette: {
     modes: ['aeolian', 'dorian', 'mixolydian', 'ionian', 'lydian'],
     progression: {

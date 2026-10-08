@@ -26,14 +26,28 @@ describe('LookaheadScheduler', () => {
     const clock = { currentTime: 0 };
     const s = new LookaheadScheduler(clock, { lookahead: 0.1 });
     const times: number[] = [];
-    s.onStep = (_step, time) => times.push(time);
+    const steps: number[] = [];
+    const skips: number[] = [];
+    s.onStep = (step, time, _dt, skipped) => {
+      times.push(time);
+      steps.push(step);
+      skips.push(skipped);
+    };
     s.start(120, 0);
     s.stop();
     clock.currentTime = 5;
     const before = times.length;
     s.pump();
+    clock.currentTime = 5.1;
+    s.pump();
     const late = times.slice(before).filter((t) => t < 5);
     expect(late).toEqual([]);
+    // The step count jumps with the clock, and the first step after says by how much.
+    const stepSeconds = 60 / 120 / 4;
+    const first = steps[before] as number;
+    expect(times[before]).toBeCloseTo(first * stepSeconds, 9);
+    expect(first - (steps[before - 1] as number) - 1).toBe(skips[before]);
+    expect(skips.slice(before + 1).every((n) => n === 0)).toBe(true);
   });
 
   it('applies tempo changes to following steps', () => {
@@ -44,7 +58,7 @@ describe('LookaheadScheduler', () => {
     s.start(120, 0);
     s.stop();
     s.setTempo(60);
-    clock.currentTime = 1;
+    clock.currentTime = 0.6;
     s.pump();
     const gaps = times.slice(1).map((t, i) => t - (times[i] as number));
     expect(gaps.at(-1)).toBeCloseTo(0.25, 9);

@@ -2,10 +2,28 @@ import type { NoteEvent } from './clock/events';
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from './clock/grid';
 import { Harmony, type HarmonyInputs } from './composer/harmony';
 import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
+import { genomeDistance, type KeyState, type TrackDistance } from './genome/distance';
+import { evolveGenome } from './genome/evolve';
 import { Fingerprinter, fingerprintChange, jitterOf, type Fingerprint } from './genome/fingerprint';
-import { buildGenome, firstChain, nextChain, type FxTrigger, type Genome } from './genome/genome';
+import {
+  buildGenome,
+  cloneGenome,
+  firstChain,
+  fxTriggers,
+  nextChain,
+  type FxTrigger,
+  type Genome,
+} from './genome/genome';
 import { mutatePhrase } from './genome/mutate';
 import { MACROS, defaultMacros, type Macros, type Triggers } from './mapping/macros';
+import {
+  domainsOf,
+  partitionAreas,
+  owns,
+  type Area,
+  type Partition,
+  type PartitionLevel,
+} from './mapping/partition';
 import { Router } from './mapping/router';
 import { DEFAULT_MAPPING, mergeRules } from './mapping/rules';
 import { clamp, lerp, mod } from './math';
@@ -25,17 +43,33 @@ import {
   type EditView,
   type RepeatMode,
   type SensorMode,
+  type SensorZones,
 } from './seeded/edits';
-import { KEY_CODES, LEVELS, keyName } from './seeded/effects';
+import {
+  KEY_CODES,
+  LEVELS,
+  describeEffect,
+  effectTargets,
+  keyName,
+  sensorEffect,
+} from './seeded/effects';
 import { InputModel } from './seeded/inputs';
 import { InputMapper, type InputMap } from './seeded/mapping';
-import { DEFAULT_LOOP_BARS, baseSong, buildSong, type Song, type SongSpec } from './seeded/song';
+import {
+  DEFAULT_LOOP_BARS,
+  baseSong,
+  buildSong,
+  evolveBase,
+  generationBars,
+  type Song,
+  type SongSpec,
+} from './seeded/song';
 import { Realizer, type HarmonyContext } from './seq/realize';
 import { TrackRunner, type FiredTrig } from './seq/runner';
-import type { TrackRole, TrackSpec, Trig } from './seq/types';
+import { cloneTrig, type TrackRole, type TrackSpec, type Trig } from './seq/types';
 import { SensorHub, type ChannelState } from './sensors/hub';
-import type { SensorEvent } from './sensors/types';
-import type { FxConfig, Machine, Style } from './styles/schema';
+import { groupOf, type SensorDescriptor, type SensorEvent, type Timescale } from './sensors/types';
+import { driftOf, type FxConfig, type Machine, type Style } from './styles/schema';
 import type { Chord } from './theory/chords';
 import { noteName } from './theory/notes';
 import type { ModeId, Scale } from './theory/scales';
@@ -75,22 +109,42 @@ export interface DeterministicOptions {
   instruments?: boolean;
   /** Your own effect and repeat for any input (see `INPUT_ROWS`). */
   mapping?: InputMap;
+  /**
+   * The song evolves a little every generation (whole loops, at least 16
+   * bars), the same way every time for the same seed (default false: the
+   * loop stays exact until an input changes it).
+   */
+  evolve?: boolean;
 }
 
 /** The song deterministic mode is playing. */
 export interface SongView {
-  /** A short id of the edits in effect; `base` with none. */
+  /** A short id of the edits in effect (and the generation); `base` with none. */
   version: string;
   /** Bar within the loop, from 0. */
   loopBar: number;
   loopBars: number;
   edits: readonly EditView[];
+  /** Inputs that changed something which lands at the next bar line. */
+  pending: readonly PendingEdit[];
+  /** Every continuous sensor's zones, for the zone meters. */
+  sensors: readonly SensorZones[];
   /** Tracks the edits muted. */
   muted: readonly string[];
+  /** Evolve on: the generation playing, from 0, and bars per generation. */
+  evolve?: { generation: number; bars: number };
+}
+
+/** An edit waiting for the next bar line. */
+export interface PendingEdit extends EditView {
+  /** Its count now in effect: 0 for an edit that is new, `count` 0 for one being undone. */
+  was: number;
+  /** The bar (from the start of the piece) it lands on. */
+  atBar: number;
 }
 
 /** Why the pattern was last rewritten. */
-export type RebuildReason = 'start' | 'section' | 'scene' | 'style' | 'resume' | 'edit';
+export type RebuildReason = 'start' | 'section' | 'scene' | 'style' | 'resume' | 'edit' | 'evolve';
 
 export interface EngineSnapshot {
   step: number;
@@ -121,9 +175,14 @@ export interface TrackView {
   machine: string;
   label: string;
   voice?: string;
+  /** The palette slot it fills: what the track is, whatever its slot id. */
+  option?: number;
   length: number;
   scale: number;
+  /** A copy of the pattern; `version` changes whenever it does. */
   trigs: readonly (Trig | undefined)[];
+  /** Changes whenever any pattern is rewritten, mutated or evolves. */
+  version: number;
   /** Step reached on the latest tick, −1 before the first. */
   position: number;
   loop: number;
@@ -150,9 +209,45 @@ export interface EngineView {
   fxTriggers: readonly FxTrigger[];
   /** Deterministic mode: the song version, its loop and its edits. */
   song?: SongView;
+  /** Which source and channel controls which areas. */
+  partition: PartitionView;
+  /** How far the music has moved from where it started. */
+  drift: DriftView;
+}
+
+/** The partition as the app shows it. */
+export interface PartitionView {
+  level: PartitionLevel;
+  groups: {
+    group: string;
+    areas: readonly Area[];
+    channels: { id: string; label: string; areas: readonly Area[] }[];
+  }[];
+}
+
+/** How far the music has come from where it started (the first genome, or the seed's song). */
+export interface DriftView {
+  /** Bars since the start it is measured from. */
+  bar: number;
+  /** 0 where it started .. 1 nothing in common. */
+  total: number;
+  harmony: number;
+  tracks: readonly TrackDistance[];
+  /** `total` at every bar so far (the latest 512). */
+  history: readonly number[];
+  /** Bars where the pattern was rewritten, and why. */
+  marks: readonly { bar: number; reason: RebuildReason }[];
 }
 
 const DEFAULT_INPUT_DELAY = 0.2;
+/** Bars of drift history kept. */
+const DRIFT_HISTORY = 512;
+/** How far one evolution goes: a section going by (scaled by variation), a scene, a resume. */
+const EVOLVE_SECTION = 0.2;
+const EVOLVE_SCENE = 0.65;
+const EVOLVE_RESUME = 0.5;
+/** Steps an effect may wait for its turn before it is dropped. */
+const FX_WAIT = 4;
 
 /** Deterministic mode's state. */
 interface Seeded {
@@ -173,6 +268,13 @@ interface Seeded {
   edits: EditView[];
   /** Step within the loop of the latest step. */
   pos: number;
+  /** The clock skipped: start the loop over at the position reached. */
+  resync: boolean;
+  /** Evolve on: bars per generation, and the generation reached with its song. */
+  evolve: { bars: number; k: number; spec: SongSpec } | undefined;
+  instruments: boolean;
+  /** Pending edits, worked out once per change of the tracker. */
+  pending: { version: number; atBar: number; list: PendingEdit[] };
 }
 
 /** Fingerprint distance that counts as a new scene. */
@@ -247,9 +349,11 @@ export class Engine {
   /** Channels with an onset on the latest step. */
   private readonly freshOnsets = new Set<string>();
   /** Effects waiting to fire, in priority order; at most one fires per step. */
-  private fxQueue: { fx: FxId; depth: number; steps: number }[] = [];
+  private fxQueue: { fx: FxId; depth: number; steps: number; until: number }[] = [];
   /** Step until which an exclusive effect (stutter, tape stop, …) holds the mix. */
   private fxBusyUntil = -1;
+  /** The step effects are queued at: the absolute step, or the loop position in deterministic mode. */
+  private fxNow = 0;
   private readonly fxCooldown = new Map<FxId, number>();
   /** The lid closing fires a tape stop once until it settles again. */
   private lidLatch = false;
@@ -259,7 +363,25 @@ export class Engine {
   private mutations: string[] = [];
   /** Increments whenever tracks or machines are rebuilt. */
   genomeVersion = 0;
+  /** Increments whenever any pattern changes (rebuilt, mutated, evolved). */
+  private patternVersion = 0;
+  private trigCopies = new Map<string, (Trig | undefined)[]>();
+  private trigCopiesFor = -1;
   private readonly det: Seeded | undefined;
+  /** Who controls what, for the live channels. */
+  private partition: Partition | undefined;
+  /** The last partition of every live channel (not a Sensor lab solo): the next one sticks to it. */
+  private settled: Partition | undefined;
+  private partitionKey = '';
+  private partitionView: PartitionView = { level: 'all', groups: [] };
+  /** Bar line at which a new scene takes over, once one is due. */
+  private sceneAt: number | undefined;
+  private sceneRisen = false;
+  /** Where the music started: the first genome and its key, for the drift. */
+  private origin: { genome: Genome; key: KeyState; bar: number } | undefined;
+  private drift: DriftView = { bar: 0, total: 0, harmony: 0, tracks: [], history: [], marks: [] };
+  private driftHistory: number[] = [];
+  private driftMarks: { bar: number; reason: RebuildReason }[] = [];
 
   constructor(opts: EngineOptions) {
     this.style = opts.style;
@@ -290,9 +412,22 @@ export class Engine {
         version: '',
         edits: [],
         pos: 0,
+        resync: false,
+        evolve: undefined,
+        instruments: d.instruments ?? true,
+        pending: { version: -1, atBar: -1, list: [] },
       };
+      if (d.evolve) {
+        const det = this.det as Seeded;
+        det.evolve = { bars: generationBars(loopBars), k: 0, spec: det.base };
+      }
       this.keySource = 'seed';
     }
+  }
+
+  /** Which source and channel controls which areas, for the channels live now. */
+  get partitionInfo(): PartitionView {
+    return this.partitionView;
   }
 
   /** The seed in deterministic mode, else undefined. */
@@ -355,31 +490,126 @@ export class Engine {
   tick(stepSeconds: number): NoteEvent[] {
     if (this.det) return this.tickSong(this.det, stepSeconds);
     const step = this.step++;
-    const { macros, triggers } = this.router.update(stepSeconds);
     const live = this.liveChannels();
+    this.updatePartition(live);
+    const { macros, triggers } = this.router.update(stepSeconds);
     const stepInBar = step % STEPS_PER_BAR;
     this.trackOnsets(live);
 
     if (live.length === 0) {
       this.waiting = true;
       this.trackState.clear();
+      this.pendingAccent = 0;
       return [];
     }
     if (this.waiting) {
       // Start (or resume) on the next bar line.
       if (stepInBar !== 0) return [];
       this.waiting = false;
-      const fp = this.fingerprinter.take(live);
-      this.rebuild(step, fp, macros, this.genome ? 'resume' : 'start');
-    } else if (stepInBar === 0 && this.pendingStyle) {
-      this.style = this.pendingStyle;
-      this.pendingStyle = undefined;
-      this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
-      this.rebuild(step, this.fingerprinter.take(live), macros, 'style');
+      this.pendingAccent = 0;
+      const resume = this.genome !== undefined;
+      if (this.applyPendingStyle()) {
+        this.rebuild(step, this.fingerprinter.take(live), live, macros, resume ? 'style' : 'start');
+      } else {
+        this.rebuild(
+          step,
+          this.fingerprinter.take(live),
+          live,
+          macros,
+          resume ? 'resume' : 'start',
+        );
+      }
+    } else if (stepInBar === 0 && this.applyPendingStyle()) {
+      this.rebuild(step, this.fingerprinter.take(live), live, macros, 'style');
     } else {
       this.boundaries(step, live, macros);
     }
+    if (stepInBar === 0) this.measureDrift(step);
     return this.play(step, live, macros, triggers);
+  }
+
+  /**
+   * While stopped: keeps the dials following the sensors, shared out as the
+   * music would share them.
+   */
+  idle(dt: number): void {
+    this.updatePartition(this.det ? sharing(this.det, this.det.readT) : this.liveChannels());
+    this.router.update(dt);
+  }
+
+  /**
+   * The clock skipped `steps` steps (the page stalled): deterministic mode
+   * moves its own clock and position on with it, reading the inputs each
+   * skipped step would have read and turning the song at each skipped bar
+   * line, so it carries on as if it never stalled. The sensor-driven mode
+   * just carries on.
+   */
+  skip(steps: number, stepSeconds: number): void {
+    const det = this.det;
+    if (!det || steps <= 0) return;
+    for (let i = 0; i < steps; i++) {
+      const step = this.step++;
+      const t = det.origin + det.clock - det.delay;
+      det.clock += stepSeconds;
+      this.updatePartition(sharing(det, t));
+      this.readInputs(det, t);
+      if (step % STEPS_PER_BAR === 0) this.songBarLine(det, step, false);
+    }
+    det.resync = true;
+  }
+
+  private applyPendingStyle(): boolean {
+    const style = this.pendingStyle;
+    if (!style) return false;
+    this.style = style;
+    this.pendingStyle = undefined;
+    this.router.setRules(mergeRules(DEFAULT_MAPPING, style.mapping));
+    this.partitionKey = '';
+    return true;
+  }
+
+  /** Shares the areas out again when the set of live channels changes. */
+  private updatePartition(live: readonly { desc: SensorDescriptor; timescale: Timescale }[]): void {
+    const key = live
+      .map((c) => `${groupOf(c.desc)}/${c.desc.id}`)
+      .sort()
+      .join('|');
+    if (key === this.partitionKey && this.partition) return;
+    this.partitionKey = key;
+    const rules = mergeRules(DEFAULT_MAPPING, this.style.mapping);
+    const channels = live.map((c) => ({
+      id: c.desc.id,
+      kind: c.desc.kind,
+      group: groupOf(c.desc),
+      timescale: c.timescale,
+    }));
+    const p = partitionAreas(channels, rules, this.settled);
+    this.partition = p;
+    if (this.det || this.router.solo === undefined) this.settled = p;
+    this.router.setPartition(p);
+    const labels = new Map(live.map((c) => [c.desc.id, c.desc.label]));
+    const groupOfId = new Map(channels.map((c) => [c.id, c.group]));
+    this.partitionView = {
+      level: p.level,
+      groups: p.groups.map((g) => ({
+        group: g.group,
+        areas: [...g.areas],
+        channels: Object.keys(p.channels)
+          .filter((id) => groupOfId.get(id) === g.group)
+          .sort()
+          .map((id) => ({ id, label: labels.get(id) ?? id, areas: [...(p.channels[id] ?? [])] })),
+      })),
+    };
+    // Sensor events follow the new owners of the effects at once.
+    const genome = this.genome;
+    if (genome && !this.det) {
+      genome.fxTriggers = fxTriggers(
+        channels,
+        genome.chain,
+        this.style.palette.effects ?? FX_IDS,
+        p,
+      );
+    }
   }
 
   snapshot(): EngineSnapshot {
@@ -400,7 +630,7 @@ export class Engine {
       chord,
       chordRoman: sym.roman,
       chordName: sym.name,
-      macros: this.router.macros,
+      macros: { ...this.router.macros },
       waiting: this.waiting,
       section: this.section,
       phrase: Math.floor(rel / STEPS_PER_BAR / phraseBars),
@@ -408,8 +638,17 @@ export class Engine {
     };
   }
 
-  /** Tracks, routes and decisions on the latest step, for display. */
+  /** Tracks, routes and decisions on the latest step, for display. Nothing in it changes later. */
   view(): EngineView {
+    if (this.trigCopiesFor !== this.patternVersion) {
+      this.trigCopiesFor = this.patternVersion;
+      this.trigCopies = new Map(
+        this.runners.map((r) => [
+          r.spec.slot,
+          r.spec.trigs.slice(0, r.spec.length).map((t) => (t ? cloneTrig(t) : undefined)),
+        ]),
+      );
+    }
     const tracks: TrackView[] = this.runners.map((r) => {
       const t = r.spec;
       const state = this.trackState.get(t.slot);
@@ -420,13 +659,15 @@ export class Engine {
         machine: t.machine,
         label: machine?.label ?? (t.role === 'fx' ? 'FX lane' : t.machine),
         ...(t.voice ? { voice: t.voice } : {}),
+        ...(t.option !== undefined ? { option: t.option } : {}),
         length: t.length,
         scale: t.scale,
-        trigs: t.trigs,
+        trigs: this.trigCopies.get(t.slot) ?? [],
+        version: this.patternVersion,
         position: r.position,
         loop: r.loop,
-        params: state?.params ?? t.base,
-        base: t.base,
+        params: { ...(state?.params ?? t.base) },
+        base: { ...t.base },
         fired: state?.fired ?? 0,
       };
     });
@@ -439,9 +680,11 @@ export class Engine {
       swing: lerp(lo, hi, this.globals.swing),
       rebuild: { ...this.rebuildInfo },
       keySource: this.keySource,
-      mutations: this.mutations,
-      fxTriggers: this.genome?.fxTriggers ?? [],
+      mutations: [...this.mutations],
+      fxTriggers: (this.genome?.fxTriggers ?? []).map((t) => ({ ...t })),
       ...(this.det ? { song: this.songView(this.det) } : {}),
+      partition: this.partitionView,
+      drift: this.drift,
     };
   }
 
@@ -456,34 +699,112 @@ export class Engine {
     const step = this.step++;
     const start = det.clock;
     det.clock += stepSeconds;
-    this.readInputs(det, det.origin + start - det.delay);
+    // Sensors share out their effects among the channels in the log: the same log, the same share.
+    const t = det.origin + start - det.delay;
+    this.updatePartition(sharing(det, t));
+    this.readInputs(det, t);
     this.waiting = false;
     const pos = step % (det.loopBars * STEPS_PER_BAR);
     det.pos = pos;
-    if (step % STEPS_PER_BAR === 0) {
-      let reason: RebuildReason | undefined = step === 0 ? 'start' : undefined;
-      if (this.pendingStyle) {
-        this.style = this.pendingStyle;
-        this.pendingStyle = undefined;
-        this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
-        det.base = baseSong(this.style, det.seed, det.loopBars);
-        reason ??= 'style';
-      }
-      const edits = det.tracker.edits();
-      const version = editsVersion(edits);
-      if (version !== det.version) reason ??= 'edit';
-      if (reason) {
-        det.edits = edits;
-        det.version = version;
-        det.song = buildSong(det.base, edits);
-        this.genomeVersion++;
-        this.rebuildInfo = { reason, step };
-        this.startLoop(det, pos);
-      } else if (pos === 0) {
-        this.startLoop(det, 0);
-      }
+    const restarted = step % STEPS_PER_BAR === 0 && this.songBarLine(det, step, true);
+    // After a stall the loop starts over where the clock now is.
+    if (det.resync) {
+      det.resync = false;
+      if (!restarted) this.startLoop(det, pos);
     }
     return this.playSong(det, pos, step);
+  }
+
+  /**
+   * A bar line in deterministic mode: a style picked meanwhile, a new
+   * generation, or edits that changed turn the song into its new version.
+   * With `play`, the loop restarts at once (true when it did); a stall's
+   * skipped bar lines only turn the song, and the loop restarts after.
+   */
+  private songBarLine(det: Seeded, step: number, play: boolean): boolean {
+    const pos = step % (det.loopBars * STEPS_PER_BAR);
+    let restarted = false;
+    let reason: RebuildReason | undefined = step === 0 ? 'start' : undefined;
+    if (this.pendingStyle) {
+      this.style = this.pendingStyle;
+      this.pendingStyle = undefined;
+      this.router.setRules(mergeRules(DEFAULT_MAPPING, this.style.mapping));
+      det.base = baseSong(this.style, det.seed, det.loopBars);
+      if (det.evolve) det.evolve = { ...det.evolve, k: 0, spec: det.base };
+      reason ??= 'style';
+    }
+    // Evolve: a new generation starts on a loop start.
+    const ev = det.evolve;
+    let evolved = false;
+    if (ev) {
+      const k = Math.floor(Math.floor(step / STEPS_PER_BAR) / ev.bars);
+      evolved = k !== ev.k;
+      while (ev.k < k) {
+        ev.k++;
+        ev.spec = evolveBase(ev.spec, ev.k, det.instruments);
+      }
+    }
+    const edits = det.tracker.edits();
+    const editsId = editsVersion(edits);
+    const version = editsId + (ev && ev.k > 0 ? `.g${ev.k}` : '');
+    // An edit that lands as a generation starts is an edit first (the generation shows in the version).
+    if (editsId !== det.version.replace(/\.g\d+$/, '')) reason ??= 'edit';
+    if (evolved) reason ??= 'evolve';
+    if (version !== det.version) reason ??= 'edit';
+    if (reason) {
+      const song = buildSong(ev?.spec ?? det.base, edits);
+      det.edits = edits.map((e) => ({ ...e, ...describeEdit(song, e) }));
+      det.version = version;
+      det.song = song;
+      this.genomeVersion++;
+      this.patternVersion++;
+      this.rebuildInfo = { reason, step };
+      this.markDrift(step, reason);
+      if (play) this.startLoop(det, pos);
+      restarted = play;
+    } else if (pos === 0 && play) {
+      this.startLoop(det, 0);
+      restarted = true;
+    }
+    this.measureSongDrift(det, step);
+    return restarted;
+  }
+
+  /** How far the song playing is from the seed's own. */
+  private measureSongDrift(det: Seeded, step: number): void {
+    const song = det.song;
+    if (!song) return;
+    const shape = (x: SongSpec) => ({ tracks: x.tracks, harmony: x.genes });
+    const key = (x: SongSpec) => ({ root: x.root, mode: String(x.modeIndex) });
+    const d = genomeDistance(shape(det.base), shape(song), { a: key(det.base), b: key(song) });
+    this.pushDrift(Math.floor(step / STEPS_PER_BAR), d);
+  }
+
+  /** Edits registered since the last bar line, waiting for the next. */
+  private pendingEdits(det: Seeded): PendingEdit[] {
+    const atBar = Math.floor(Math.max(0, this.step - 1) / STEPS_PER_BAR) + 1;
+    const cache = det.pending;
+    if (cache.version === det.tracker.version && cache.atBar === atBar) return cache.list;
+    const song = det.song;
+    const now = new Map(det.tracker.edits().map((e) => [e.input, e]));
+    const applied = new Map(det.edits.map((e) => [e.input, e]));
+    const list: PendingEdit[] = [];
+    for (const input of new Set([...now.keys(), ...applied.keys()])) {
+      const next = now.get(input);
+      const was = applied.get(input);
+      if (next && was && next.count === was.count) continue;
+      const e = (next ?? was) as EditView;
+      list.push({
+        ...e,
+        count: next?.count ?? 0,
+        was: was?.count ?? 0,
+        atBar,
+        ...(song ? describeEdit(song, e) : {}),
+      });
+    }
+    list.sort((a, b) => (a.input < b.input ? -1 : a.input > b.input ? 1 : 0));
+    det.pending = { version: det.tracker.version, atBar, list };
+    return list;
   }
 
   /** Hands every press and reading up to time `t` to the edit tracker. */
@@ -494,10 +815,16 @@ export class Engine {
       if (!desc || !mapped) continue;
       det.tracker.press(pressInput(e), pressSource(e, desc.label), mapped.effect, mapped.repeat);
     }
+    for (const id of det.model.takeRemoved()) det.tracker.forget(id);
     for (const r of det.model.readings(t)) {
       const desc = det.model.describe(r.id);
-      const mapped = desc && det.mapper.sensor(desc, r.timescale);
-      if (mapped) det.tracker.reading(r.id, r.label, r.x, mapped.map, mapped);
+      const mapped = desc && det.mapper.sensor(desc, r.timescale, domainsOf(this.partition, r.id));
+      if (mapped) {
+        det.tracker.reading(r.id, r.label, r.x, mapped.map, {
+          ...mapped,
+          ...(desc.circular ? { circular: true } : {}),
+        });
+      }
     }
     det.readT = t;
   }
@@ -530,6 +857,7 @@ export class Engine {
     const { palette } = song.style;
     const stepInBar = pos % STEPS_PER_BAR;
     const loopSteps = det.loopBars * STEPS_PER_BAR;
+    this.fxNow = pos;
     const macros = songMacros(song);
 
     matrix.clearExternal();
@@ -586,6 +914,7 @@ export class Engine {
       if (!song.muted.has(spec.slot)) {
         for (const f of trigs) {
           const evs = this.realize(spec, f, params, h, macros, step, loopSteps - pos, realizer);
+          for (const e of evs) e.loopStep = pos;
           events.push(...evs);
           for (const e of evs) firedVel = Math.max(firedVel, e.vel);
         }
@@ -597,6 +926,7 @@ export class Engine {
     const fx = this.emitFx(pos);
     if (fx) {
       fx.step = step;
+      fx.loopStep = pos;
       const lane = this.trackState.get('fx');
       if (lane) lane.fired = fx.vel;
     }
@@ -625,7 +955,7 @@ export class Engine {
       chord: slot?.chord ?? { degree: 0, size: 3 },
       chordRoman: slot?.roman ?? '–',
       chordName: slot?.name ?? '–',
-      macros: this.router.macros,
+      macros: { ...this.router.macros },
       waiting: this.waiting,
       section: 0,
       phrase: Math.floor(det.pos / STEPS_PER_BAR),
@@ -640,7 +970,10 @@ export class Engine {
       loopBar: Math.floor(det.pos / STEPS_PER_BAR),
       loopBars: det.loopBars,
       edits: det.edits,
+      pending: this.pendingEdits(det),
+      sensors: det.tracker.sensors(),
       muted: [...(det.song?.muted ?? [])],
+      ...(det.evolve ? { evolve: { generation: det.evolve.k, bars: det.evolve.bars } } : {}),
     };
   }
 
@@ -675,56 +1008,110 @@ export class Engine {
     if (change.distance > SCENE_DISTANCE) {
       this.farSteps++;
       this.farChannel = change.channel?.label;
-      // A new scene is coming at the next bar line: rise into it.
-      const barsAtNextBar = Math.floor((step - this.sectionStart) / STEPS_PER_BAR) + 1;
-      const left = STEPS_PER_BAR - (step % STEPS_PER_BAR);
-      if (this.farSteps === SCENE_HOLD && barsAtNextBar >= SCENE_MIN_BARS && left >= 2) {
-        this.queueFx('sweep', 0.8, left);
+      if (this.farSteps >= SCENE_HOLD && this.sceneAt === undefined) {
+        // The next bar line with time to rise into it, once the scene has had its bars,
+        // and never past the section's end, where it would be lost in the section's rebuild.
+        let at = (Math.floor(step / STEPS_PER_BAR) + 1) * STEPS_PER_BAR;
+        if (at - step < 4) at += STEPS_PER_BAR;
+        const end = this.sectionStart + this.style.palette.sectionBars * STEPS_PER_BAR;
+        this.sceneAt = Math.min(
+          Math.max(at, this.sectionStart + SCENE_MIN_BARS * STEPS_PER_BAR),
+          end,
+        );
+        this.sceneRisen = false;
       }
     } else {
       this.farSteps = 0;
+      this.sceneAt = undefined;
+    }
+    // A new scene is coming: rise into it during the bar before.
+    const left = this.sceneAt !== undefined ? this.sceneAt - step : 0;
+    if (this.sceneAt !== undefined && !this.sceneRisen && left <= STEPS_PER_BAR && left >= 2) {
+      this.sceneRisen = true;
+      this.queueFx('sweep', 0.8, left);
     }
     if (step % STEPS_PER_BAR !== 0) return;
     const { palette } = this.style;
     const barsIn = Math.floor((step - this.sectionStart) / STEPS_PER_BAR);
-    if (barsIn >= palette.sectionBars) {
+    // A section that ends while the sensors are far from where it started ends in a new
+    // scene, even if they have not held there long enough to call one yet.
+    if (
+      (this.sceneAt !== undefined && step >= this.sceneAt) ||
+      (barsIn >= palette.sectionBars && this.farSteps > 0)
+    ) {
       this.section++;
-      this.rebuild(step, fp, macros, 'section');
-    } else if (this.farSteps >= SCENE_HOLD && barsIn >= SCENE_MIN_BARS) {
-      this.rebuild(step, fp, macros, 'scene');
+      this.rebuild(step, fp, live, macros, 'scene');
+    } else if (barsIn >= palette.sectionBars) {
+      this.section++;
+      this.rebuild(step, fp, live, macros, 'section');
     } else if (barsIn > 0 && barsIn % Math.max(1, palette.phraseBars) === 0 && this.genome) {
       const amount = clamp(0.25 + 0.75 * macros.variation);
       const rng = new Rng(hashInts(this.chain, barsIn, fp.fineHash));
-      this.mutations = mutatePhrase(this.genome, rng, amount);
+      this.mutations = mutatePhrase(this.genome, rng, amount, palette);
+      this.patternVersion++;
       this.harmony?.onPhraseStart(this.harmonyInputs(macros));
     }
   }
 
+  /**
+   * Writes the next genome. A section going by, a new scene or a resume
+   * evolve the one playing (a little, more, quite a lot), so the music keeps
+   * its identity and drifts; the start and a new style write a fresh one.
+   */
   private rebuild(
     step: number,
     fp: Fingerprint,
+    live: readonly ChannelState[],
     macros: Readonly<Macros>,
     reason: RebuildReason,
   ): void {
-    const first = this.genome === undefined;
-    this.chain = first ? firstChain(this.seed0, fp) : nextChain(this.chain, fp, this.section);
-    const genome = buildGenome(this.style, fp, this.chain, this.section, macros);
+    const prev = this.genome;
+    this.chain = prev ? nextChain(this.chain, fp, this.section) : firstChain(this.seed0, fp);
+    const fresh = buildGenome(this.style, fp, this.chain, this.section, macros, this.partition);
+    let genome = fresh;
+    if (prev && (reason === 'section' || reason === 'scene' || reason === 'resume')) {
+      const rate =
+        reason === 'scene'
+          ? EVOLVE_SCENE
+          : reason === 'resume'
+            ? EVOLVE_RESUME
+            : EVOLVE_SECTION * (0.5 + macros.variation);
+      const evolved = evolveGenome(prev, fresh, new Rng(hashInts(this.chain, 0xe701)), {
+        rate,
+        drift: driftOf(this.style),
+        palette: this.style.palette,
+      });
+      genome = evolved.genome;
+      this.mutations = evolved.changes;
+    } else {
+      this.mutations = [];
+    }
     this.genome = genome;
     this.matrix = new ModMatrix(genome.matrix);
     this.runners = genome.tracks.map(
-      (t) => new TrackRunner(t, new Rng(hashInts(this.chain, Number(t.slot.slice(1)), 0x5eed))),
+      (t) => new TrackRunner(t, new Rng(hashInts(this.chain, slotSeed(t.slot), 0x5eed))),
     );
+    // A track keeps its voicing only while it is the same instrument in the same slot.
+    const before = new Map((prev?.tracks ?? []).map((t) => [t.slot, t]));
     this.realizers = new Map(
-      genome.tracks.map((t) => [t.slot, this.realizers.get(t.slot) ?? new Realizer()]),
+      genome.tracks.map((t) => {
+        const old = before.get(t.slot);
+        const same = old && old.role === t.role && old.machine === t.machine;
+        return [t.slot, (same && this.realizers.get(t.slot)) || new Realizer()];
+      }),
     );
     this.sectionStart = step;
     this.anchor = fp;
     this.farSteps = 0;
-    this.mutations = [];
+    this.sceneAt = undefined;
     this.genomeVersion++;
+    this.patternVersion++;
     const channel = reason === 'scene' ? this.farChannel : undefined;
     this.rebuildInfo = { reason, step, ...(channel ? { channel } : {}) };
+    this.markDrift(step, reason);
 
+    // The harmony reads this step's modulated tension and brightness.
+    this.evaluateGlobals(live, macros);
     const inputs = this.harmonyInputs(macros);
     if (!this.harmony) {
       const root = this.keyRoot ?? hashInts(fp.coarseHash, 12) % 12;
@@ -736,24 +1123,95 @@ export class Engine {
         inputs,
         root,
       );
-      return;
-    }
-    const harmony = this.harmony;
-    harmony.setGenes(this.style.palette, genome.harmony, inputs);
-    if (reason === 'scene' || reason === 'resume') {
-      // A new scene starts in a new key: next to the place's key, or one the sensors pick.
-      const root =
-        this.keyRoot !== undefined
-          ? mod(harmony.root + (hashInts(this.chain) % 2 === 0 ? 7 : 5), 12)
-          : hashInts(fp.coarseHash, this.chain) % 12;
-      harmony.setRoot(root, inputs);
-      this.keySource = this.keyRoot !== undefined ? 'place' : 'sensors';
     } else {
-      const before = harmony.root;
-      harmony.onSectionStart(inputs);
-      if (harmony.root !== before) this.keySource = 'colour';
-      harmony.advance(inputs, true);
+      const harmony = this.harmony;
+      harmony.setGenes(this.style.palette, genome.harmony, inputs);
+      if (reason === 'scene' || reason === 'resume') {
+        // A new scene starts in a new key: next to the place's key, or one the sensors pick.
+        const root =
+          this.keyRoot !== undefined
+            ? mod(harmony.root + (hashInts(this.chain) % 2 === 0 ? 7 : 5), 12)
+            : hashInts(fp.coarseHash, this.chain) % 12;
+        harmony.setRoot(root, inputs);
+        this.keySource = this.keyRoot !== undefined ? 'place' : 'sensors';
+      } else {
+        const before = harmony.root;
+        harmony.onSectionStart(inputs);
+        if (harmony.root !== before) this.keySource = 'colour';
+        const chordSteps = Math.max(1, Math.round(genome.harmony.chordRateBars * STEPS_PER_BAR));
+        harmony.advance(inputs, this.chordStartsPhrase(0, chordSteps));
+      }
     }
+    if (!prev || reason === 'start' || reason === 'style') {
+      const h = this.harmony as Harmony;
+      this.origin = {
+        genome: cloneGenome(genome),
+        key: { root: h.root, mode: h.mode },
+        bar: Math.floor(step / STEPS_PER_BAR),
+      };
+      this.driftHistory = [];
+      this.driftMarks = [{ bar: 0, reason }];
+    }
+  }
+
+  /** True when the chord after the one starting at `rel` starts a phrase. */
+  private chordStartsPhrase(rel: number, chordSteps: number): boolean {
+    const phraseSteps = Math.max(1, this.style.palette.phraseBars) * STEPS_PER_BAR;
+    return (rel + chordSteps) % phraseSteps === 0;
+  }
+
+  /** Sets this step's sources and works out the globals, without moving the matrix on. */
+  private evaluateGlobals(live: readonly ChannelState[], macros: Readonly<Macros>): void {
+    const matrix = this.matrix;
+    const genome = this.genome;
+    if (!matrix || !genome) return;
+    this.setSources(matrix, live, macros);
+    const offsets = matrix.evaluate();
+    this.globals = globalsFrom(macros, genome.swing, offsets);
+  }
+
+  private setSources(matrix: ModMatrix, live: readonly ChannelState[], macros: Readonly<Macros>) {
+    matrix.clearExternal();
+    for (const ch of live) {
+      const id = ch.desc.id;
+      const f = ch.features;
+      matrix.setSource(sensorSource(id, 'level'), 2 * f.level - 1);
+      matrix.setSource(sensorSource(id, 'activity'), f.activity);
+      matrix.setSource(sensorSource(id, 'trend'), f.trend);
+      matrix.setSource(sensorSource(id, 'onset'), this.onsetEnv.get(id) ?? 0);
+      matrix.setSource(sensorSource(id, 'jitter'), 2 * jitterOf(ch.raw) - 1);
+    }
+    for (const m of MACROS) matrix.setSource(macroSource(m), 2 * macros[m] - 1);
+  }
+
+  private markDrift(step: number, reason: RebuildReason): void {
+    const bar = Math.floor(step / STEPS_PER_BAR) - (this.origin?.bar ?? 0);
+    this.driftMarks = [...this.driftMarks, { bar, reason }].slice(-64);
+  }
+
+  /** At every bar line: how far the genome playing is from the first one. */
+  private measureDrift(step: number): void {
+    const origin = this.origin;
+    const genome = this.genome;
+    const harmony = this.harmony;
+    if (!origin || !genome || !harmony) return;
+    const d = genomeDistance(origin.genome, genome, {
+      a: origin.key,
+      b: { root: harmony.root, mode: harmony.mode },
+    });
+    this.pushDrift(Math.floor(step / STEPS_PER_BAR) - origin.bar, d);
+  }
+
+  private pushDrift(bar: number, d: { total: number; harmony: number; tracks: TrackDistance[] }) {
+    this.driftHistory = [...this.driftHistory, d.total].slice(-DRIFT_HISTORY);
+    this.drift = {
+      bar,
+      total: d.total,
+      harmony: d.harmony,
+      tracks: d.tracks,
+      history: this.driftHistory,
+      marks: this.driftMarks,
+    };
   }
 
   private harmonyInputs(macros: Readonly<Macros>): HarmonyInputs {
@@ -778,34 +1236,18 @@ export class Engine {
     const { palette } = this.style;
     const stepInBar = step % STEPS_PER_BAR;
     const rel = step - this.sectionStart;
+    this.fxNow = step;
 
     // External sources for the matrix.
-    matrix.clearExternal();
-    for (const ch of live) {
-      const id = ch.desc.id;
-      const f = ch.features;
-      matrix.setSource(sensorSource(id, 'level'), 2 * f.level - 1);
-      matrix.setSource(sensorSource(id, 'activity'), f.activity);
-      matrix.setSource(sensorSource(id, 'trend'), f.trend);
-      matrix.setSource(sensorSource(id, 'onset'), this.onsetEnv.get(id) ?? 0);
-      matrix.setSource(sensorSource(id, 'jitter'), 2 * jitterOf(ch.raw) - 1);
-    }
-    for (const m of MACROS) matrix.setSource(macroSource(m), 2 * macros[m] - 1);
+    this.setSources(matrix, live, macros);
     const offsets = matrix.evaluate();
     const off = (id: string) => offsets.get(id) ?? 0;
-    this.globals = {
-      tension: clamp(macros.tension + off(globalDest('tension'))),
-      brightness: clamp(macros.brightness + off(globalDest('brightness'))),
-      space: clamp(macros.space + off(globalDest('space'))),
-      swing: clamp(genome.swing + off(globalDest('swing'))),
-      fx: clamp(0.5 + off(globalDest('fx'))),
-    };
+    this.globals = globalsFrom(macros, genome.swing, offsets);
 
     // Harmony: chords change on the genome's chord rate, counted from the section start.
     const chordSteps = Math.max(1, Math.round(genome.harmony.chordRateBars * STEPS_PER_BAR));
     if (rel > 0 && rel % chordSteps === 0) {
-      const phraseSteps = Math.max(1, palette.phraseBars) * STEPS_PER_BAR;
-      harmony.advance(this.harmonyInputs(macros), (rel + chordSteps) % phraseSteps === 0);
+      harmony.advance(this.harmonyInputs(macros), this.chordStartsPhrase(rel, chordSteps));
     }
     const h: HarmonyContext = {
       scale: harmony.scale,
@@ -912,7 +1354,8 @@ export class Engine {
 
   private queueFx(fx: FxId, depth: number, steps: number): void {
     const allowed = this.style.palette.effects ?? FX_IDS;
-    if (allowed.includes(fx)) this.fxQueue.push({ fx, depth, steps: Math.max(1, steps) });
+    if (!allowed.includes(fx)) return;
+    this.fxQueue.push({ fx, depth, steps: Math.max(1, steps), until: this.fxNow + FX_WAIT });
   }
 
   /** Effects fired by sensor events: onsets, or the lid closing fast. */
@@ -922,7 +1365,7 @@ export class Engine {
       if (this.freshOnsets.has(t.channelId)) this.queueFx(t.fx, 0.9, FX_INFO[t.fx].steps);
     }
     for (const ch of live) {
-      if (ch.desc.kind !== 'lid.angle') continue;
+      if (ch.desc.kind !== 'lid.angle' || !owns(this.partition, ch.desc.id, 'space.fx')) continue;
       if (!this.lidLatch && ch.features.trend < -0.6) {
         this.lidLatch = true;
         this.queueFx('tapeStop', 1, FX_INFO.tapeStop.steps);
@@ -937,12 +1380,18 @@ export class Engine {
    * if it takes over the mix, does not clash with one already playing.
    */
   private emitFx(step: number): NoteEvent | undefined {
-    const queue = this.fxQueue;
-    this.fxQueue = [];
-    for (const c of queue) {
+    // Effects that could not fire wait a beat for their turn, then drop.
+    this.fxQueue = this.fxQueue.filter((c) => c.until >= step);
+    const i = this.fxQueue.findIndex((c) => {
       const info = FX_INFO[c.fx];
-      if ((this.fxCooldown.get(c.fx) ?? -1) > step) continue;
-      if (info.exclusive && step < this.fxBusyUntil) continue;
+      if ((this.fxCooldown.get(c.fx) ?? -1) > step) return false;
+      return !(info.exclusive && step < this.fxBusyUntil);
+    });
+    if (i >= 0) {
+      const c = this.fxQueue.splice(i, 1)[0] as (typeof this.fxQueue)[number];
+      const info = FX_INFO[c.fx];
+      // The same effect queued twice fires once.
+      this.fxQueue = this.fxQueue.filter((q) => q.fx !== c.fx);
       this.fxCooldown.set(c.fx, step + c.steps + info.rest);
       if (info.exclusive) this.fxBusyUntil = step + c.steps;
       return {
@@ -1031,6 +1480,22 @@ export class Engine {
   }
 }
 
+/** The globals of a step: the dials plus what the matrix routes into them. */
+function globalsFrom(
+  macros: Readonly<Macros>,
+  swing: number,
+  offsets: ReadonlyMap<string, number>,
+): GlobalParams {
+  const off = (id: string) => offsets.get(id) ?? 0;
+  return {
+    tension: clamp(macros.tension + off(globalDest('tension'))),
+    brightness: clamp(macros.brightness + off(globalDest('brightness'))),
+    space: clamp(macros.space + off(globalDest('space'))),
+    swing: clamp(swing + off(globalDest('swing'))),
+    fx: clamp(0.5 + off(globalDest('fx'))),
+  };
+}
+
 /** Macros of a song: the defaults, with its space and brightness levels. */
 function songMacros(song: SongSpec): Macros {
   return {
@@ -1040,7 +1505,28 @@ function songMacros(song: SongSpec): Macros {
   };
 }
 
+/** What an edit does to a song, and the tracks it lands on. */
+function describeEdit(song: SongSpec, e: EditView): { description: string; slots: string[] } {
+  return {
+    description: describeEffect(song, e.effect),
+    slots: e.effect.target === undefined ? [] : effectTargets(song, e.effect).map((t) => t.slot),
+  };
+}
+
 /** A number per track slot, for seeding its rolls. */
+/**
+ * The channels deterministic mode shares the areas among: the continuous
+ * sensors heard by `t`. Keys, buttons and shakes act through their presses
+ * wherever they are, and a sensor that has not read yet can do nothing with
+ * an area, so neither takes one from a sensor that can.
+ */
+function sharing(det: Seeded, t: number): { desc: SensorDescriptor; timescale: Timescale }[] {
+  const heard = new Set(det.model.readings(t).map((r) => r.id));
+  return det.model
+    .channels()
+    .filter((c) => heard.has(c.desc.id) && sensorEffect(c.desc, c.timescale) !== undefined);
+}
+
 function slotSeed(slot: string): number {
   return Number(slot.slice(1)) || slot.length;
 }

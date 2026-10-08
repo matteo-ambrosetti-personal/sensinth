@@ -9,6 +9,12 @@ export interface NoteEvent {
   role: TrackRole;
   /** Absolute step index (16ths since start). */
   step: number;
+  /**
+   * Deterministic mode: the step within the loop. Anything the renderer
+   * varies per note (humanized timing, noise) follows it, so every pass of
+   * the loop sounds the same.
+   */
+  loopStep?: number;
   /** Length in steps (may be fractional). */
   durSteps: number;
   /** MIDI note number; omitted for unpitched drum hits. */

@@ -11,6 +11,7 @@ import {
   type TriggerId,
   type Triggers,
 } from './macros';
+import { MACRO_AREA, TRIGGER_AREA, owns, type Partition } from './partition';
 import { DEFAULT_MAPPING, type FeatureId, type MappingRules } from './rules';
 
 export interface MacroRoute {
@@ -43,15 +44,19 @@ const AUTO_WEIGHT = 0.5;
  * Connects sensor channels to macros. Channels whose kind matches a rule use
  * it; any other channel is auto-assigned by timescale to the least-used
  * suitable macro, which is how a brand-new sensor joins without code changes.
+ *
+ * With a partition (see `partitionAreas`), a channel only drives the dials
+ * and triggers of the areas it controls, and every dial whose area has an
+ * owner gets a driver: one sensor alone moves all eight.
  */
 export class Router {
   readonly macros: Macros = defaultMacros();
   readonly targets: Macros = defaultMacros();
   private routes: MacroRoute[] = [];
   private triggerRoutes: TriggerRoute[] = [];
-  private builtFor = -1;
-  private ranges: Partial<Record<MacroId, [number, number]>> = {};
+  private builtFor = '';
   private soloId: string | undefined;
+  private partition: Partition | undefined;
 
   constructor(
     private readonly hub: SensorHub,
@@ -60,7 +65,19 @@ export class Router {
 
   setRules(rules: MappingRules): void {
     this.rules = rules;
-    this.builtFor = -1;
+    this.builtFor = '';
+  }
+
+  /** Shares the dials out by area; `undefined` lets every channel drive its rules' dials. */
+  setPartition(partition: Partition | undefined): void {
+    // The same channels can be shared out anew (a style change re-deals them): compare the share, not the key.
+    if (partition === this.partition) return;
+    this.partition = partition;
+    this.builtFor = '';
+  }
+
+  get currentPartition(): Partition | undefined {
+    return this.partition;
   }
 
   /**
@@ -73,11 +90,6 @@ export class Router {
 
   get solo(): string | undefined {
     return this.soloId;
-  }
-
-  /** Per-macro output range (from the style); targets are scaled into it. */
-  setRanges(ranges: Partial<Record<MacroId, [number, number]>> = {}): void {
-    this.ranges = ranges;
   }
 
   /** Current routes (rebuilt automatically when channels change). */
@@ -105,9 +117,7 @@ export class Router {
       weight[r.macro] += r.weight;
     }
     for (const id of MACROS) {
-      const raw = weight[id] > 0 ? sum[id] / weight[id] : MACRO_INFO[id].fallback;
-      const [lo, hi] = this.ranges[id] ?? [0, 1];
-      this.targets[id] = lo + (hi - lo) * raw;
+      this.targets[id] = weight[id] > 0 ? sum[id] / weight[id] : MACRO_INFO[id].fallback;
       this.macros[id] +=
         (this.targets[id] - this.macros[id]) * onePoleAlpha(dt, MACRO_INFO[id].slewTau);
     }
@@ -125,15 +135,20 @@ export class Router {
   }
 
   private ensureRoutes(): void {
-    if (this.builtFor === this.hub.version) return;
-    this.builtFor = this.hub.version;
+    const p = this.partition;
+    const key = `${this.hub.version}|${p?.key ?? '-'}`;
+    if (this.builtFor === key) return;
+    this.builtFor = key;
     const routes: MacroRoute[] = [];
     const triggerRoutes: TriggerRoute[] = [];
     const unmatched: { id: string; timescale: Timescale }[] = [];
+    const channels = this.hub.list().filter((ch) => !p || ch.desc.id in p.channels);
 
-    for (const ch of this.hub.list()) {
+    for (const ch of channels) {
       const { id, kind } = ch.desc;
-      const rules = this.rules.macros.filter((r) => r.kind === kind);
+      const rules = this.rules.macros.filter(
+        (r) => r.kind === kind && owns(p, id, MACRO_AREA[r.macro]),
+      );
       for (const r of rules) {
         routes.push({
           channelId: id,
@@ -144,7 +159,8 @@ export class Router {
           auto: false,
         });
       }
-      for (const r of this.rules.triggers.filter((t) => t.kind === kind)) {
+      for (const r of this.rules.triggers) {
+        if (r.kind !== kind || !owns(p, id, TRIGGER_AREA[r.trigger])) continue;
         triggerRoutes.push({
           channelId: id,
           trigger: r.trigger,
@@ -157,17 +173,41 @@ export class Router {
 
     for (const { id, timescale } of unmatched) {
       const target = AUTO_TARGETS[timescale];
-      const macro = leastUsed(target.macros, routes);
-      routes.push({
-        channelId: id,
-        feature: target.feature,
-        macro,
-        weight: AUTO_WEIGHT,
-        invert: false,
-        auto: true,
-      });
-      if (timescale === 'fast') {
-        triggerRoutes.push({ channelId: id, trigger: 'accent', minStrength: 0.3, auto: true });
+      const allowed = target.macros.filter((m) => owns(p, id, MACRO_AREA[m]));
+      const fallback = MACROS.filter((m) => owns(p, id, MACRO_AREA[m]));
+      const pool = allowed.length > 0 ? allowed : fallback;
+      if (pool.length > 0) {
+        routes.push({
+          channelId: id,
+          feature: target.feature,
+          macro: leastUsed(pool, routes),
+          weight: AUTO_WEIGHT,
+          invert: false,
+          auto: true,
+        });
+      }
+      if (timescale === 'fast' && owns(p, id, TRIGGER_AREA.accent)) {
+        if (!triggerRoutes.some((r) => r.channelId === id && r.trigger === 'accent')) {
+          triggerRoutes.push({ channelId: id, trigger: 'accent', minStrength: 0.3, auto: true });
+        }
+      }
+    }
+
+    // Every dial whose area has an owner gets a driver, so a sensor alone moves them all.
+    if (p) {
+      for (const m of MACROS) {
+        if (routes.some((r) => r.macro === m)) continue;
+        const owner = p.owners[MACRO_AREA[m]][0];
+        const ch = owner !== undefined ? this.hub.get(owner) : undefined;
+        if (!ch) continue;
+        routes.push({
+          channelId: owner as string,
+          feature: AUTO_TARGETS[ch.timescale].feature,
+          macro: m,
+          weight: AUTO_WEIGHT,
+          invert: false,
+          auto: true,
+        });
       }
     }
     this.routes = routes;

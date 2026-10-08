@@ -8,6 +8,7 @@ import {
   type TrackView,
   type Trig,
 } from '@sensinth/core';
+import { theme, trackColor, trackColorVar } from './theme';
 
 /** Params shown on each track, in this order. */
 const SHOWN: readonly TrackParam[] = ['cutoff', 'decay', 'timbre', 'tune', 'level', 'pan'];
@@ -35,9 +36,11 @@ interface Colors {
   inset: string;
   ink: string;
   muted: string;
+  /** The track's own colour. */
   accent: string;
   lock: string;
   grid: string;
+  font: string;
 }
 
 interface Row {
@@ -80,23 +83,41 @@ export class TracksView {
     }
     this.empty.hidden = tracks.length > 0;
     if (tracks.length === 0) return;
-    const colors = this.colors();
+    const drift = new Map((view?.drift.tracks ?? []).map((d) => [d.slot, d.value]));
     for (const t of tracks) {
       const row = this.rows.get(t.slot);
       if (!row) continue;
-      row.meta.textContent = `${ROLE_LABEL[t.role]} · ${t.length} steps · ${speedLabel(t.scale)}`;
-      row.mute.setAttribute('aria-pressed', String(this.controls.isMuted(t.slot)));
-      row.li.classList.toggle('is-muted', this.controls.isMuted(t.slot));
+      const colors = this.colors(t.slot);
+      const moved = drift.get(t.slot);
+      const meta = `${ROLE_LABEL[t.role]} · ${t.length} steps · ${speedLabel(t.scale)}${
+        moved !== undefined && t.role !== 'fx' ? ` · drift ${Math.round(moved * 100)}%` : ''
+      }`;
+      if (row.meta.textContent !== meta) row.meta.textContent = meta;
+      const muted = this.controls.isMuted(t.slot);
+      if (row.mute.getAttribute('aria-pressed') !== String(muted)) {
+        row.mute.setAttribute('aria-pressed', String(muted));
+        row.li.classList.toggle('is-muted', muted);
+      }
       this.drawGrid(row, t, colors);
       if (row.fxNow && row.fxLegend) this.drawFx(row.fxNow, row.fxLegend, t);
       for (const [p, cells] of row.params) {
         const v = t.params[p];
         cells.bar.style.transform = `scaleX(${v.toFixed(3)})`;
         cells.base.style.left = `${(t.base[p] * 100).toFixed(1)}%`;
-        cells.value.textContent = String(Math.round(v * 100));
+        const text = String(Math.round(v * 100));
+        if (cells.value.textContent !== text) cells.value.textContent = text;
       }
       if (scopes) row.scope?.draw(this.controls.analyser(t.slot), colors);
     }
+  }
+
+  /** Lights a track's row for a moment: an edit just landed on it. */
+  flash(slot: string): void {
+    const li = this.rows.get(slot)?.li;
+    if (!li) return;
+    li.classList.remove('is-flash');
+    void li.offsetWidth;
+    li.classList.add('is-flash');
   }
 
   private drawFx(now: HTMLElement, legend: HTMLElement, t: TrackView): void {
@@ -129,6 +150,7 @@ export class TracksView {
       const li = document.createElement('li');
       li.className = fx ? 'track is-fx' : 'track';
       li.dataset.slot = t.slot;
+      if (!fx) li.style.setProperty('--track', trackColorVar(t.slot));
       li.innerHTML = `
         <div class="track-head">
           <span class="track-slot">${t.slot.toUpperCase()}</span>
@@ -193,8 +215,8 @@ export class TracksView {
     const rowH = cell + labelH + 3;
     const cssHeight = rows * rowH;
     const trigs = t.trigs.slice(0, t.length);
-    // Redraw only when something visible changed.
-    const key = `${cssWidth}:${t.position}:${t.fired > 0}:${t.length}:${c.accent}:${JSON.stringify(trigs)}`;
+    // Redraw only when something visible changed (the pattern changes with its version).
+    const key = `${cssWidth}:${t.position}:${t.fired > 0}:${t.length}:${t.version}`;
     if (key === row.gridKey) return;
     row.gridKey = key;
     if (canvas.style.height !== `${cssHeight}px`) canvas.style.height = `${cssHeight}px`;
@@ -207,7 +229,7 @@ export class TracksView {
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    ctx.font = `500 9px ${getComputedStyle(canvas).getPropertyValue('--font-mono') || 'monospace'}`;
+    ctx.font = `15px ${c.font}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     const gap = (cssWidth - COLUMNS * cell) / (COLUMNS - 1);
@@ -219,10 +241,9 @@ export class TracksView {
       const x = (i % COLUMNS) * (cell + gap);
       const y = Math.floor(i / COLUMNS) * rowH;
       const trig = trigs[i];
-      // Beats are marked by a slightly darker cell.
+      // Beats are marked by a lighter cell.
       ctx.fillStyle = i % 4 === 0 ? c.grid : c.inset;
-      roundRect(ctx, x, y, cell, cell, 4);
-      ctx.fill();
+      ctx.fillRect(x, y, cell, cell);
       if (trig) {
         placed++;
         if (trig.locks) locked++;
@@ -237,14 +258,12 @@ export class TracksView {
       if (i === t.position) {
         if (trig && t.fired > 0) {
           // The trig that just played lights up fully.
-          ctx.fillStyle = c.accent;
-          roundRect(ctx, x + 2, y + 2, cell - 4, cell - 4, 3);
-          ctx.fill();
+          ctx.fillStyle = c.ink;
+          ctx.fillRect(x + 2, y + 2, cell - 4, cell - 4);
         }
         ctx.strokeStyle = c.ink;
         ctx.lineWidth = 2;
-        roundRect(ctx, x + 1, y + 1, cell - 2, cell - 2, 3);
-        ctx.stroke();
+        ctx.strokeRect(x + 1, y + 1, cell - 2, cell - 2);
       }
     }
     const label = `${t.slot.toUpperCase()} ${t.label}: ${t.length} steps, ${placed} trigs, ${conditional} with conditions or probability, ${locked} with parameter locks`;
@@ -254,16 +273,16 @@ export class TracksView {
     }
   }
 
-  private colors(): Colors {
-    const css = getComputedStyle(this.list);
-    const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  private colors(slot: string): Colors {
+    const t = theme();
     return {
-      inset: v('--inset', '#dde3e8'),
-      ink: v('--ink', '#121820'),
-      muted: v('--muted', '#56626e'),
-      accent: v('--accent', '#00806f'),
-      lock: v('--chart-activity', '#4a3aa7'),
-      grid: v('--line', '#c6cfd7'),
+      inset: t.inset,
+      ink: t.ink,
+      muted: t.muted,
+      accent: trackColor(slot),
+      lock: t.magenta,
+      grid: t.line,
+      font: t.fontMono,
     };
   }
 }
@@ -281,14 +300,13 @@ function drawTrig(
   const pad = 2;
   ctx.globalAlpha = 0.35 + 0.65 * trig.vel;
   ctx.fillStyle = c.accent;
-  roundRect(ctx, x + pad + shift, y + pad, cell - 2 * pad, cell - 2 * pad, 3);
-  ctx.fill();
+  ctx.fillRect(Math.round(x + pad + shift), y + pad, cell - 2 * pad, cell - 2 * pad);
   ctx.globalAlpha = 1;
   if (trig.fx && cell >= 18) {
     ctx.save();
     ctx.fillStyle = c.inset;
     ctx.textBaseline = 'middle';
-    ctx.font = `600 ${cell >= 24 ? 8 : 7}px ${getComputedStyle(ctx.canvas).getPropertyValue('--font-mono') || 'monospace'}`;
+    ctx.font = `${cell >= 24 ? 15 : 13}px ${c.font}`;
     ctx.fillText(FX_INFO[trig.fx].short, x + cell / 2 + shift, y + cell / 2 + 0.5, cell - 4);
     ctx.restore();
   }
@@ -296,15 +314,12 @@ function drawTrig(
     ctx.setLineDash([2, 2]);
     ctx.strokeStyle = c.ink;
     ctx.lineWidth = 1;
-    roundRect(ctx, x + 0.5, y + 0.5, cell - 1, cell - 1, 4);
-    ctx.stroke();
+    ctx.strokeRect(x + 0.5, y + 0.5, cell - 1, cell - 1);
     ctx.setLineDash([]);
   }
   if (trig.locks) {
     ctx.fillStyle = c.lock;
-    ctx.beginPath();
-    ctx.arc(x + cell - 5, y + 5, 2.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillRect(x + cell - 7, y + 3, 4, 4);
   }
   if (trig.retrig) {
     ctx.strokeStyle = c.ink;
@@ -339,18 +354,6 @@ function speedLabel(scale: number): string {
   return labels[String(scale)] ?? `${scale}×`;
 }
 
-function roundRect(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
-): void {
-  ctx.beginPath();
-  ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
-}
-
 /** A track's waveform. Reports its loudness in `data-level`, so tests can see a mute. */
 class TrackScope {
   private data = new Float32Array(new ArrayBuffer(512 * 4));
@@ -372,8 +375,8 @@ class TrackScope {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
     ctx.strokeStyle = c.accent;
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'miter';
     ctx.beginPath();
     let sum = 0;
     if (!analyser) {

@@ -90,6 +90,8 @@ interface TrackEls {
 
 interface Bars {
   set(id: string, v: number, centered?: boolean): void;
+  /** Removes the rows not listed (an LFO whose track has gone). */
+  keep(ids: ReadonlySet<string>): void;
 }
 
 /**
@@ -204,6 +206,12 @@ export class FlowView {
     els.root.addEventListener('pointerover', (e) => this.hover(nodeOf(e.target)));
     els.root.addEventListener('pointerleave', () => this.hover(undefined));
     els.root.addEventListener('focusin', (e) => this.hover(nodeOf(e.target)));
+    // Tabbing out of the diagram lights it all again.
+    els.root.addEventListener('focusout', (e) => {
+      if (!(e.relatedTarget instanceof Node && els.root.contains(e.relatedTarget))) {
+        this.hover(undefined);
+      }
+    });
     els.root.addEventListener('click', (e) => {
       const id = nodeOf(e.target);
       if (id) this.pin(this.pinned === id ? undefined : id);
@@ -305,15 +313,22 @@ export class FlowView {
       this.genomeNote.textContent = snap.waiting
         ? 'Waiting for a sensor.'
         : `Section ${snap.section + 1}, written at bar ${Math.floor(r.step / 16) + 1} (${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}). Every sensor shapes the next one.`;
+      // One bar per LFO and chaos map: what its first route reads now.
+      const lfos = new Map<string, number>();
+      const chaos = new Map<string, number>();
       for (const r of view.routes) {
+        const v = r.amount === 0 ? 0 : r.value / r.amount;
         if (r.source.startsWith('lfo:')) {
-          const v = r.amount === 0 ? 0 : r.value / r.amount;
-          this.modBars.lfo.set(r.source.slice(4).toUpperCase(), v, true);
+          const id = r.source.slice(4).toUpperCase();
+          if (!lfos.has(id)) lfos.set(id, v);
         } else if (r.source.startsWith('chaos:')) {
-          const v = r.amount === 0 ? 0 : r.value / r.amount;
-          this.modBars.chaos.set(r.source.slice(6).toUpperCase(), v, true);
+          const id = r.source.slice(6).toUpperCase();
+          if (!chaos.has(id)) chaos.set(id, v);
         }
       }
+      for (const [id, v] of lfos) this.modBars.lfo.set(id, v, true);
+      for (const [id, v] of chaos) this.modBars.chaos.set(id, v, true);
+      this.modBars.lfo.keep(new Set(lfos.keys()));
     }
 
     // Tracks and their mix strip.
@@ -816,6 +831,7 @@ const REBUILD: Record<EngineView['rebuild']['reason'], string> = {
   style: 'new style',
   resume: 'sensors back',
   edit: 'new version',
+  evolve: 'evolved',
 };
 
 /** Columns, left to right: sensors, modulators, tracks, mix. */
@@ -905,6 +921,13 @@ function bars(parent: HTMLElement, ids: readonly string[]): Bars {
   };
   for (const id of ids) row(id);
   return {
+    keep(keep) {
+      for (const [id, bar] of [...rows]) {
+        if (keep.has(id)) continue;
+        bar.closest('li')?.remove();
+        rows.delete(id);
+      }
+    },
     set(id, v, centered = false) {
       const bar = row(id);
       if (centered) {

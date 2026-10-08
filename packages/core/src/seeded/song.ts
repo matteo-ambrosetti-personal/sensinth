@@ -1,11 +1,12 @@
 import { STEPS_PER_BAR } from '../clock/grid';
 import { Harmony, type HarmonyInputs } from '../composer/harmony';
+import { evolveTracks } from '../genome/evolve';
 import type { HarmonyGenes } from '../genome/genome';
-import { mod } from '../math';
+import { clamp, lerp, mod } from '../math';
 import type { MatrixSpec } from '../mod/matrix';
 import { Rng, hashInts } from '../random';
-import type { TrackSpec, Trig } from '../seq/types';
-import type { FxConfig, Style } from '../styles/schema';
+import { cloneTrack, type TrackSpec } from '../seq/types';
+import { driftOf, type FxConfig, type Style } from '../styles/schema';
 import type { Chord } from '../theory/chords';
 import { DIATONIC_MODES, Scale, byBrightness, type ModeId } from '../theory/scales';
 import { LEVELS, applyEffect, effectPhase, type Effect } from './effects';
@@ -47,6 +48,8 @@ export interface SongSpec {
   genes: HarmonyGenes;
   matrix: MatrixSpec;
   fx?: FxConfig;
+  /** How many times the song has evolved (Evolve on), 0 for the seed's own song. */
+  generation?: number;
 }
 
 /** One chord of the loop with everything a note needs to be realized against it. */
@@ -120,6 +123,67 @@ export function baseSong(style: Style, seed: number, loopBars = DEFAULT_LOOP_BAR
   };
 }
 
+/** How far one generation moves the song: about a quarter of its beats, a step of its sound. */
+const EVOLVE_RATE = 0.3;
+
+/** Bars per generation: whole loops, at least 16 bars. */
+export function generationBars(loopBars: number): number {
+  return loopBars * Math.ceil(16 / Math.max(1, loopBars));
+}
+
+/**
+ * The next generation of a song (Evolve on): its tracks a step toward a
+ * fresh take of the seed for generation `k`, now and then the key a fifth
+ * up. It only depends on the song, the seed and `k`, so a seed always
+ * evolves the same way. With `instruments` false, no track changes its
+ * instrument.
+ */
+export function evolveBase(prev: SongSpec, k: number, instruments = true): SongSpec {
+  const { style, seed } = prev;
+  const donor = buildSeededGenome(style, seed, k);
+  const rng = new Rng(hashInts(seed, k, 0xe701));
+  const base = driftOf(style);
+  const drift = instruments ? base : { ...base, machine: 0 };
+  const { tracks } = evolveTracks(
+    prev.tracks,
+    donor.tracks,
+    rng,
+    { rate: EVOLVE_RATE, drift, palette: style.palette },
+    donor.density,
+  );
+  const lane = prev.tracks.find((t) => t.role === 'fx');
+  const all = lane ? [...tracks, cloneTrack(lane)] : tracks;
+  const h = clamp(EVOLVE_RATE * drift.harmony);
+  const genes: HarmonyGenes = {
+    ...prev.genes,
+    progressionBias: prev.genes.progressionBias.map((b, i) =>
+      lerp(b, donor.harmony.progressionBias[i] ?? b, h),
+    ),
+  };
+  const live = new Set(all.map((t) => t.slot));
+  return {
+    ...prev,
+    tracks: all,
+    muted: new Set(prev.muted),
+    genes,
+    root: rng.chance(0.25 * h) ? mod(prev.root + 7, 12) : prev.root,
+    swingLevel: rng.chance(0.2 * drift.rhythm)
+      ? mod(prev.swingLevel + (rng.chance(0.5) ? 1 : -1), LEVELS)
+      : prev.swingLevel,
+    matrix: {
+      ...prev.matrix,
+      routes: prev.matrix.routes.filter((r) => {
+        const m = /^(?:lfo:)?(t\d+)\./.exec(r.dest);
+        return !m || live.has(m[1] as string);
+      }),
+      lfos: Object.fromEntries(
+        all.filter((t) => t.role !== 'fx').map((t) => [t.slot, { ...t.lfo }]),
+      ),
+    },
+    generation: k,
+  };
+}
+
 /** One edit of the song: an effect, applied `count` times. */
 export interface SongEdit {
   /** Which input made it, e.g. `key:KeyA`; edits are applied sorted by phase, then input. */
@@ -128,28 +192,8 @@ export interface SongEdit {
   count: number;
 }
 
-function copyTrig(t: Trig): Trig {
-  return {
-    ...t,
-    cond: { ...t.cond },
-    ...(t.note ? { note: { ...t.note } } : {}),
-    ...(t.retrig ? { retrig: { ...t.retrig } } : {}),
-    ...(t.locks ? { locks: { ...t.locks } } : {}),
-  };
-}
-
-function copyTrack(t: TrackSpec): TrackSpec {
-  return {
-    ...t,
-    trigs: t.trigs.map((trig) => (trig ? copyTrig(trig) : undefined)),
-    base: { ...t.base },
-    range: [t.range[0], t.range[1]],
-    lfo: { ...t.lfo },
-  };
-}
-
 function copy(spec: SongSpec): SongSpec {
-  return { ...spec, tracks: spec.tracks.map(copyTrack), muted: new Set(spec.muted) };
+  return { ...spec, tracks: spec.tracks.map(cloneTrack), muted: new Set(spec.muted) };
 }
 
 /**

@@ -30,10 +30,10 @@ import { WaveTable } from './waves';
 /**
  * A note's timing offset for humanizing, 0..1, from what the note is rather
  * than from a running generator: the same note on the same step of a loop
- * (768 steps cover every loop length) always lands the same way.
+ * always lands the same way.
  */
 function humanizeOf(ev: NoteEvent): number {
-  return hashInts(hashString(ev.part), ev.step % 768, ev.midi ?? 0, 0x4a) / 2 ** 32;
+  return hashInts(hashString(ev.part), ev.loopStep ?? ev.step, ev.midi ?? 0, 0x4a) / 2 ** 32;
 }
 
 /** What the renderer follows every step. */

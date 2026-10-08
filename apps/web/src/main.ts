@@ -35,7 +35,10 @@ import { ComputePressureSource } from './sensors/pressure';
 import { ReplayWebSource, formatDuration } from './sensors/replay';
 import { SimulatedWebSource } from './sensors/simulated';
 import { nowSeconds } from './sensors/source';
+import { AreasView } from './ui/areas';
+import { BannerView } from './ui/banner';
 import { DialsView } from './ui/dials';
+import { DriftChart } from './ui/drift';
 import { FlowView } from './ui/flow/flow';
 import { LabView, SOURCE_NAMES } from './ui/lab';
 import { ChangesView } from './ui/changes';
@@ -44,6 +47,7 @@ import { MatrixView } from './ui/matrix';
 import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
 import { SourcesView } from './ui/sources';
+import { Stage } from './ui/stage/stage';
 import { TracksView } from './ui/tracks';
 
 loadFonts();
@@ -100,6 +104,21 @@ setBpm(bpm);
 const stylesEl = $('styles');
 const styleDesc = $('style-desc');
 
+/** Each cartridge's label colour. */
+const CART_COLORS: Record<string, string> = {
+  free: 'var(--ink)',
+  chiptune: 'var(--t4)',
+  ambient: 'var(--t6)',
+  lofi: 'var(--t2)',
+  hiphop: 'var(--t1)',
+  jazz: 'var(--t7)',
+  blues: '#4a90f0',
+  techno: 'var(--t5)',
+  synthwave: '#ff60c0',
+  dnb: 'var(--t3)',
+  minimal: '#c8c8d8',
+};
+
 function renderStyles(): void {
   stylesEl.replaceChildren();
   for (const s of STYLES) {
@@ -108,6 +127,7 @@ function renderStyles(): void {
     btn.className = 'style-chip';
     btn.setAttribute('role', 'radio');
     btn.setAttribute('aria-checked', String(s.id === style.id));
+    btn.style.setProperty('--cart', CART_COLORS[s.id] ?? 'var(--line)');
     btn.textContent = s.name;
     btn.addEventListener('click', () => selectStyle(s));
     stylesEl.append(btn);
@@ -131,7 +151,7 @@ const locationSource = new LocationSource();
 player.keyHint = () => locationSource.keyHint();
 const keyboard = new KeyboardSource();
 // While a deterministic song plays, keys such as Space and the arrows play it, not the page.
-keyboard.capture = () => player.playing && player.deterministic !== undefined;
+keyboard.capture = () => player.playingDeterministic;
 const sources = new SourceManager(player.hub, [
   new MotionSource(),
   new PointerSource(),
@@ -153,7 +173,6 @@ const sources = new SourceManager(player.hub, [
   new SimulatedWebSource(),
 ]);
 const sourcesView = new SourcesView($('sources'), sources, (id, on) => void toggleSource(id, on));
-sources.onChange = () => sourcesView.render();
 sourcesView.render();
 
 /**
@@ -252,7 +271,7 @@ function anySourceOn(): boolean {
 }
 
 function renderTransport(): void {
-  const playing = player.playing;
+  const playing = player.playing || player.isRestarting;
   const seeded = player.deterministic;
   const canPlay = playing || anySourceOn() || seeded !== undefined;
   playBtn.setAttribute('aria-pressed', String(playing));
@@ -269,13 +288,28 @@ function renderTransport(): void {
   else if (!playing)
     hint.textContent = `You set tempo and style. The sensors write the rest.${tilt}`;
   else if (playingSeed !== undefined)
-    hint.textContent = `Seed ${playingSeed}. Each key and sensor changes the song its own way, from the next bar; with no change it loops.`;
+    hint.textContent = `Seed ${playingSeed}. Each key and sensor changes the song its own way, from the next bar: the box on the screen says what and when. With no change it loops.`;
   else if (player.view()?.snapshot.waiting ?? true)
     hint.textContent = 'Waiting for a sensor… the music starts on the next bar after one sends.';
   else if (channels.some((c) => c.desc.source === 'phone'))
     hint.textContent = 'Shake, tilt, clap or point the camera somewhere else. The music follows.';
   else hint.textContent = 'Playing. Every track below is written by the sensors.';
 }
+
+// A menu picked with the mouse or a finger hands the keys back to the music; one stepped
+// through with the keyboard keeps the focus, so it can go on stepping.
+let pointedAt: Node | null = null;
+document.addEventListener('pointerdown', (e) => (pointedAt = e.target as Node), true);
+document.addEventListener('keydown', () => (pointedAt = null), true);
+document.addEventListener(
+  'change',
+  (e) => {
+    const el = e.target;
+    if (el instanceof HTMLSelectElement && pointedAt && el.contains(pointedAt)) el.blur();
+    pointedAt = null;
+  },
+  true,
+);
 
 // Play becomes available as soon as a source is switched on.
 sources.onChange = () => {
@@ -286,7 +320,8 @@ sources.onChange = () => {
 playBtn.addEventListener('click', async (event) => {
   // After a click, let Space and Enter reach the music rather than this button.
   if (event.detail > 0) playBtn.blur();
-  if (player.playing) player.stop();
+  // Stop, also while Start over is still starting the audio again.
+  if (player.playing || player.isRestarting) player.stop();
   else {
     if (!anySourceOn() && !player.deterministic) return;
     try {
@@ -325,6 +360,7 @@ const detLoop = $<HTMLSelectElement>('det-loop');
 const detRepeat = $<HTMLSelectElement>('det-repeat');
 const detSensors = $<HTMLSelectElement>('det-sensors');
 const detInstruments = $<HTMLSelectElement>('det-instruments');
+const detEvolve = $<HTMLInputElement>('det-evolve');
 const detDesc = $('det-desc');
 const detMap = $<HTMLDetailsElement>('det-map');
 const detMapCount = $('det-map-count');
@@ -341,6 +377,7 @@ detSensors.value = SENSOR_MODES.includes(prefs.sensors as SensorMode)
   ? (prefs.sensors as string)
   : 'zones';
 detInstruments.value = prefs.instruments === false ? 'fixed' : 'free';
+detEvolve.checked = prefs.evolve ?? false;
 
 function readSeed(): number {
   const v = Math.floor(Number(detSeed.value));
@@ -353,8 +390,10 @@ const REPEAT_TEXT: Record<RepeatMode, string> = {
   once: 'Only the first press of each key counts.',
 };
 const SENSOR_TEXT: Record<SensorMode, string> = {
-  zones: 'Sensors act by zone: back in a zone, back to its song.',
+  zones:
+    'Sensors act by zone, counted from where they were at Play: back in a zone, back to its song.',
   steps: 'Sensors act in steps: each zone crossed counts as a press.',
+  off: 'Sensors change nothing: only keys and presses edit the song.',
 };
 
 /** Applies the settings; `remap` redraws the input map (its defaults changed). */
@@ -364,13 +403,14 @@ function applyDeterministic(remap = true): void {
   const repeat = detRepeat.value as RepeatMode;
   const sensors = detSensors.value as SensorMode;
   const instruments = detInstruments.value !== 'fixed';
+  const evolve = detEvolve.checked;
   if (remap) inputMap.set(prefs.inputMap ?? {}, { repeat, sensors, instruments });
   const mapping = inputMap.map;
   detSeed.value = String(seed);
   player.setDeterministic(
-    detOn.checked ? { seed, loopBars, repeat, sensors, instruments, mapping } : undefined,
+    detOn.checked ? { seed, loopBars, repeat, sensors, instruments, mapping, evolve } : undefined,
   );
-  for (const el of [detSeed, detLoop, detRepeat, detSensors, detInstruments]) {
+  for (const el of [detSeed, detLoop, detRepeat, detSensors, detInstruments, detEvolve]) {
     el.disabled = !detOn.checked;
   }
   detMap.hidden = !detOn.checked;
@@ -383,22 +423,28 @@ function applyDeterministic(remap = true): void {
     repeat,
     sensors,
     instruments,
+    evolve,
     inputMap: mapping,
   });
   savePrefs(prefs);
   const later = player.playing ? ' Takes effect when you start over or at the next Play.' : '';
   const kept = instruments ? '' : ' The instruments stay the seed’s.';
+  const grows = evolve
+    ? ' Evolve: every 16 bars or so it grows a little, the same way every time.'
+    : '';
   const own =
     changed > 0
       ? ` ${changed === 1 ? 'One input does' : `${changed} inputs do`} what you chose.`
       : '';
   detDesc.textContent = detOn.checked
-    ? `The seed writes a ${loopBars}-bar song that loops until something changes. Every key and sensor changes it its own way, the same way every time. ${REPEAT_TEXT[repeat]} ${SENSOR_TEXT[sensors]}${kept}${own}${later}`
+    ? `The seed writes a ${loopBars}-bar song that loops until something changes. Every key and sensor changes it its own way, the same way every time. ${REPEAT_TEXT[repeat]} ${SENSOR_TEXT[sensors]}${kept}${grows}${own}${later}`
     : `Off: the sensors write everything, so the smallest change plays different music.${later}`;
   renderTransport();
 }
-for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors, detInstruments]) {
-  el.addEventListener('change', () => applyDeterministic());
+for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors, detInstruments, detEvolve]) {
+  el.addEventListener('change', () => {
+    applyDeterministic();
+  });
 }
 inputMap.onChange = (map) => {
   prefs.inputMap = map;
@@ -471,7 +517,9 @@ const flow = new FlowView(
 );
 
 type Mode = 'play' | 'flow' | 'lab';
-function setMode(mode: Mode): void {
+let mode: Mode = 'play';
+function setMode(next: Mode): void {
+  mode = next;
   for (const m of ['play', 'flow', 'lab'] as const) {
     $(`mode-${m}`).setAttribute('aria-pressed', String(mode === m));
     document.querySelectorAll<HTMLElement>(`.${m}-only`).forEach((el) => (el.hidden = mode !== m));
@@ -502,9 +550,18 @@ const matrixView = new MatrixView($('matrix'), $('matrix-empty'), channelLabel);
 const changesView = new ChangesView(
   $('song-panel'),
   $('song-loop'),
+  $('pending'),
   $('changes'),
   $('changes-empty'),
+  $('zones'),
+  () => mode === 'play',
 );
+/** A source's name by its id (what the partition calls a group). */
+const groupName = (group: string) => sources.get(group)?.label ?? SOURCE_NAMES[group] ?? group;
+const areasView = new AreasView($('areas'), $('areas-note'), groupName);
+const driftChart = new DriftChart($<HTMLCanvasElement>('drift'), $('drift-now'));
+const banner = new BannerView($('banner'));
+const stage = new Stage($<HTMLCanvasElement>('stage'));
 const genomeSectionLabel = $('g-section-label');
 const genomeHashLabel = $('g-hash-label');
 const genomeChangeLabel = $('g-change-label');
@@ -521,19 +578,26 @@ const KEY_SOURCE = {
   colour: 'moved by colour',
   seed: 'from the seed',
 };
-const REBUILD = {
+const REBUILD: Record<EngineView['rebuild']['reason'], string> = {
   start: 'start',
   section: 'new section',
   scene: 'new scene',
   style: 'new style',
   resume: 'sensors back',
   edit: 'your edit',
+  evolve: 'evolved',
 };
 
 function renderGenome(view: EngineView | undefined): void {
   const snap = view?.snapshot;
   if (!view || !snap || snap.waiting) {
     for (const el of Object.values(genome)) el.textContent = '–';
+    // Stopped: the labels say what the next piece will show.
+    const seeded = player.deterministic !== undefined;
+    genomeSectionLabel.textContent = seeded ? 'Loop' : 'Section';
+    genomeHashLabel.textContent = seeded ? 'Seed' : 'Genome';
+    genomeChangeLabel.textContent = seeded ? 'Version' : 'Last rewrite';
+    tracksNote.textContent = seeded ? 'written by the seed' : 'written by the sensors';
     return;
   }
   const song = view.song;
@@ -562,6 +626,8 @@ let lastWaiting: boolean | undefined;
 
 let shownVersion = -1;
 let shownRouter: Router | undefined;
+let shownPartition: EngineView['partition'] | undefined;
+let lastBanner = 0;
 let lastFrame = performance.now();
 let lastUi = 0;
 let lastScope = 0;
@@ -583,11 +649,18 @@ function frame(t: number): void {
   if (t - lastUi > 66) {
     lastUi = t;
     const channels = player.hub.list();
-    if (player.hub.version !== shownVersion || player.router !== shownRouter) {
+    const partition = player.partition();
+    if (
+      player.hub.version !== shownVersion ||
+      player.router !== shownRouter ||
+      partition !== shownPartition
+    ) {
       shownVersion = player.hub.version;
       shownRouter = player.router;
-      sensorsView.rebuild(channels, player.router);
+      shownPartition = partition;
+      sensorsView.rebuild(channels, player.router, partition);
       dials.updateSources(player.router, (id) => player.hub.get(id)?.desc.label ?? id);
+      areasView.update(partition);
       renderTransport();
     }
     sensorsView.update(channels, nowSeconds());
@@ -603,14 +676,38 @@ function frame(t: number): void {
     renderGenome(view);
     changesView.update(view);
     matrixView.update(view);
+    driftChart.update(view);
     if (snap?.waiting !== lastWaiting) {
       lastWaiting = snap?.waiting;
       renderTransport();
     }
   }
 
+  // The screen, the edit banner and what lands: about 30 times a second, on the Play page.
+  if (mode === 'play') {
+    stage.frame(
+      {
+        view: player.view(),
+        events: player.events(),
+        fx: player.fxNow(),
+        playing: player.playing,
+        styleId: style.id,
+        styleName: style.name,
+        bpm,
+        isMuted: (slot) => player.isMuted(slot),
+      },
+      t,
+    );
+  }
+  if (t - lastBanner > 33) {
+    lastBanner = t;
+    const landed = banner.update(player.view(), t);
+    for (const slot of landed?.slots ?? []) tracksView.flash(slot);
+    if (landed) stage.react(landed.slots);
+  }
+
   // Track grids and scopes: about 30 times a second, only in Play mode.
-  if (t - lastTracks > 33 && !$('tracks').closest('[hidden]')) {
+  if (t - lastTracks > 33 && mode === 'play') {
     lastTracks = t;
     tracksView.update(player.view(), true);
   }

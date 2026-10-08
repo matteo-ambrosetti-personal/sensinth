@@ -1,5 +1,6 @@
 import { mod } from '../math';
 import { hashString } from '../random';
+import type { Domain } from '../mapping/partition';
 import type { SensorDescriptor, SensorEvent, Timescale } from '../sensors/types';
 import type { RepeatMode, SensorMode } from './edits';
 import {
@@ -231,23 +232,35 @@ export class InputMapper {
         if (code !== undefined && at) {
           return this.resolve(at.row, KEY_EFFECTS[code] as Effect, at.track);
         }
-        return this.resolve('keys:other', this.catalogue[mod(v, n)] as Effect);
+        return this.resolve('keys:other', wrapped(this.catalogue[mod(v, n)] as Effect));
       }
       case 'note':
-        return this.resolve('notes', this.catalogue[mod(v, n)] as Effect);
+        return this.resolve('notes', wrapped(this.catalogue[mod(v, n)] as Effect));
       case 'button':
-        return this.resolve('buttons', this.catalogue[mod(v, n)] as Effect);
+        return this.resolve('buttons', wrapped(this.catalogue[mod(v, n)] as Effect));
       case 'onset': {
         const own = ONSET_EFFECTS[kind];
         if (own) return this.resolve(`onset:${kind}`, own);
-        return this.resolve('onset:other', this.catalogue[hashString(kind) % n] as Effect);
+        return this.resolve('onset:other', wrapped(this.catalogue[hashString(kind) % n] as Effect));
       }
     }
   }
 
-  /** What a continuous sensor does, or undefined for inputs that act through presses. */
-  sensor(desc: SensorDescriptor, timescale: Timescale): MappedSensor | undefined {
-    const own = sensorEffect(desc, timescale);
+  /**
+   * What a continuous sensor does, or undefined for inputs that act through
+   * presses. `owned`: the domains the sensor controls (see `partitionAreas`).
+   */
+  sensor(
+    desc: SensorDescriptor,
+    timescale: Timescale,
+    owned?: readonly Domain[],
+  ): MappedSensor | undefined {
+    const own = sensorEffect(
+      desc,
+      timescale,
+      owned,
+      this.instruments ? undefined : INSTRUMENT_EFFECTS,
+    );
     if (!own || PRESS_KINDS.has(desc.kind)) return undefined;
     const row =
       desc.kind in SENSOR_EFFECTS
@@ -281,6 +294,11 @@ export class InputMapper {
     if (!this.instruments && INSTRUMENT_EFFECTS.has(effect.id)) return undefined;
     return { effect, ...(rule?.repeat ? { repeat: rule.repeat } : {}) };
   }
+}
+
+/** An effect picked from the catalogue: its track number wraps round the tracks there are. */
+function wrapped(e: Effect): Effect {
+  return typeof e.target === 'number' ? { ...e, wrap: true } : e;
 }
 
 /** True when an effect's target is a choice (track effects on single inputs). */

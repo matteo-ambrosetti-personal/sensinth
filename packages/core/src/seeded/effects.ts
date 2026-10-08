@@ -1,4 +1,5 @@
 import { FX_IDS, FX_INFO } from '../fx/effects';
+import type { Domain } from '../mapping/partition';
 import { clamp, mod } from '../math';
 import { hashInts, hashString, Rng } from '../random';
 import { generateTrack, newTrigAt, writePattern } from '../seq/generate';
@@ -41,7 +42,39 @@ export interface Effect {
   target?: Target;
   /** Direction for effects that can go either way (rotate, transpose). */
   dir?: 1 | -1;
+  /**
+   * A track number past the last track wraps round to the first. Inputs
+   * without a key of their own (MIDI keys, other keys, sensors) wrap; the
+   * number keys don't: 6 on a four-track song does nothing.
+   */
+  wrap?: true;
 }
+
+/** The part of the music each effect changes. */
+export const EFFECT_DOMAIN: Readonly<Record<EffectId, Domain>> = {
+  rotate: 'rhythm',
+  thin: 'rhythm',
+  fill: 'rhythm',
+  reverse: 'rhythm',
+  ratchet: 'rhythm',
+  halfTime: 'rhythm',
+  doubleTime: 'rhythm',
+  swing: 'rhythm',
+  drumsOut: 'rhythm',
+  fifth: 'harmony',
+  transpose: 'harmony',
+  mode: 'harmony',
+  chords: 'harmony',
+  chordRate: 'harmony',
+  octave: 'harmony',
+  rewrite: 'sound',
+  machine: 'sound',
+  brightness: 'sound',
+  space: 'space',
+  fxThrow: 'space',
+  addTrack: 'motion',
+  mute: 'motion',
+};
 
 /** Levels of swing, space and brightness the song moves between. */
 export const LEVELS = 5;
@@ -226,24 +259,57 @@ export const SENSOR_EFFECTS: Readonly<Record<string, SensorEffect>> = {
   'geo.place': { effect: { id: 'fifth' }, centered: false },
 };
 
+/** What a continuous sensor may do in each domain, when its kind's own effect lies elsewhere. */
+const DOMAIN_SENSOR_EFFECTS: Readonly<Record<Domain, readonly SensorEffect[]>> = {
+  rhythm: [
+    { effect: { id: 'rotate', target: 'drums', dir: 1 }, centered: true },
+    { effect: { id: 'swing' }, centered: false },
+  ],
+  harmony: [
+    { effect: { id: 'fifth' }, centered: true },
+    { effect: { id: 'mode' }, centered: true },
+    { effect: { id: 'chords' }, centered: false },
+  ],
+  sound: [
+    { effect: { id: 'brightness' }, centered: false },
+    { effect: { id: 'rewrite', target: 'melodic' }, centered: false },
+  ],
+  space: [{ effect: { id: 'space' }, centered: false }],
+  motion: [
+    { effect: { id: 'addTrack' }, centered: false },
+    { effect: { id: 'thin', target: 'rhythmic' }, centered: false },
+  ],
+};
+
 /**
  * The effect of a continuous sensor, or undefined for channels that act
  * through presses instead (keys, buttons, and fast sensors such as a shake,
- * whose onsets are presses; pointer speed does nothing).
+ * whose onsets are presses; pointer speed does nothing). With `owned`, the
+ * domains the sensor's areas lie in: it keeps its kind's own effect when
+ * that is one of them, else picks one from them, leaving out `exclude`d
+ * effects (the instrument changes, when the instruments are fixed).
  */
 export function sensorEffect(
   desc: SensorDescriptor,
   timescale: Timescale,
+  owned?: readonly Domain[],
+  exclude?: ReadonlySet<EffectId>,
 ): SensorEffect | undefined {
   if (PRESS_KINDS.has(desc.kind) || timescale === 'fast') return undefined;
-  const known = SENSOR_EFFECTS[desc.kind];
-  if (known) return known;
-  if (timescale === 'slow') return { effect: { id: 'space' }, centered: false };
   const [lo, hi] = desc.range ?? [0, 1];
-  return {
-    effect: { id: 'rewrite', target: 1 + (hashString(desc.id) % MAX_TRACKS) },
-    centered: lo < 0 && hi > 0,
-  };
+  const own: SensorEffect =
+    SENSOR_EFFECTS[desc.kind] ??
+    (timescale === 'slow'
+      ? { effect: { id: 'space' }, centered: false }
+      : {
+          effect: { id: 'rewrite', target: 1 + (hashString(desc.id) % MAX_TRACKS), wrap: true },
+          centered: lo < 0 && hi > 0,
+        });
+  if (!owned || owned.length === 0 || owned.includes(EFFECT_DOMAIN[own.effect.id])) return own;
+  const pool = owned
+    .flatMap((d) => DOMAIN_SENSOR_EFFECTS[d])
+    .filter((e) => !exclude?.has(e.effect.id));
+  return pool.length > 0 ? (pool[hashString(desc.id) % pool.length] as SensorEffect) : own;
 }
 
 const TARGET_NAMES: Record<Exclude<Target, number>, string> = {
@@ -310,6 +376,19 @@ export function effectLabel(e: Effect): string {
   }
 }
 
+/**
+ * What an effect does to this song, naming the tracks it lands on: "Rewrite
+ * T1 · Triangle bass", "Mute T6 · no such track".
+ */
+export function describeEffect(song: SongSpec, e: Effect): string {
+  const label = effectLabel(e);
+  if (e.target === undefined) return label;
+  const tracks = effectTargets(song, e);
+  if (tracks.length === 0) return `${label} · no such track`;
+  const names = tracks.map((t) => machineOf(song, t)?.label ?? t.machine);
+  return `${label} · ${names.length > 3 ? `${names.slice(0, 3).join(', ')}…` : names.join(', ')}`;
+}
+
 /** What an effect does, without its target: "Rotate right", "Key up a fifth". */
 export function effectName(e: Effect): string {
   switch (e.id) {
@@ -339,11 +418,15 @@ export function effectName(e: Effect): string {
 const MELODIC: readonly TrackRole[] = ['lead', 'arp', 'chords', 'pad', 'bass', 'drone'];
 const RHYTHMIC: readonly TrackRole[] = ['drum', 'bass', 'lead', 'arp', 'chords'];
 
-/** The tracks an effect works on. */
-function targets(song: SongSpec, target: Target | undefined): TrackSpec[] {
+/** The tracks an effect works on: none for a track number past the last, unless it wraps. */
+export function effectTargets(song: SongSpec, e: Effect): TrackSpec[] {
   const playing = song.tracks.filter((t) => t.role !== 'fx');
   if (playing.length === 0) return [];
-  if (typeof target === 'number') return [playing[(target - 1) % playing.length] as TrackSpec];
+  const target = e.target;
+  if (typeof target === 'number') {
+    if (target > playing.length && !e.wrap) return [];
+    return [playing[(target - 1) % playing.length] as TrackSpec];
+  }
   switch (target ?? 'all') {
     case 'drums': {
       const drums = playing.filter((t) => t.role === 'drum');
@@ -412,7 +495,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
   const { palette } = song.style;
   switch (e.id) {
     case 'mute':
-      if (odd) for (const t of targets(song, e.target)) song.muted.add(t.slot);
+      if (odd) for (const t of effectTargets(song, e)) song.muted.add(t.slot);
       return;
     case 'drumsOut': {
       if (!odd) return;
@@ -427,7 +510,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       return;
     }
     case 'rewrite':
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const machine = machineOf(song, t);
         if (!machine) continue;
         if (t.role === 'drone') {
@@ -447,11 +530,11 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       }
       return;
     case 'rotate':
-      for (const t of targets(song, e.target)) rotate(t, c * (e.dir ?? 1));
+      for (const t of effectTargets(song, e)) rotate(t, c * (e.dir ?? 1));
       return;
     case 'reverse':
       if (!odd) return;
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const n = Math.max(1, t.length);
         const old = t.trigs.slice(0, n);
         for (let i = 0; i < n; i++) t.trigs[i] = old[n - 1 - i];
@@ -459,7 +542,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       return;
     case 'octave': {
       const k = cycle5(c);
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         if (t.role === 'drum') {
           t.base.tune = clamp(t.base.tune + 0.18 * k);
           continue;
@@ -471,8 +554,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       return;
     }
     case 'thin':
-      if (c < 0) return;
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const placed = indices(t, (i) => i > 0 && !!t.trigs[i]);
         const drop = placed.filter((i) => hashInts(song.seed, slotNumber(t), i, 0x7417) % 4 < k);
         // At least one step changes, however short the pattern.
@@ -480,8 +562,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       }
       return;
     case 'fill':
-      if (c < 0) return;
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const empty = indices(t, (i) => !t.trigs[i]);
         const add = empty.filter((i) => hashInts(song.seed, slotNumber(t), i, 0xf111) % 4 < k);
         for (const i of add.length > 0 ? add : empty.slice(0, 1)) {
@@ -490,8 +571,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       }
       return;
     case 'ratchet':
-      if (c < 0) return;
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const placed = indices(t, (i) => !!t.trigs[i]);
         const rolled = placed.filter(
           (i) => hashInts(song.seed, slotNumber(t), i, 0x7a7c) % 2 === 0,
@@ -503,7 +583,7 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       }
       return;
     case 'machine':
-      for (const t of targets(song, e.target)) {
+      for (const t of effectTargets(song, e)) {
         const own = palette.slots.find((s) => s.machines.includes(t.machine))?.machines ?? [];
         // A slot with one machine borrows the palette's other machines of the same role.
         const options =
@@ -522,7 +602,6 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       }
       return;
     case 'addTrack': {
-      if (c < 0) return;
       const used = new Set(song.tracks.map((t) => t.machine));
       const free = palette.slots.filter((s) => !s.machines.some((m) => used.has(m)));
       // Every slot taken: another take of an optional one (a second lead, more percussion).
@@ -550,7 +629,6 @@ export function applyEffect(song: SongSpec, e: Effect, c: number): void {
       return;
     }
     case 'fxThrow': {
-      if (c < 0) return;
       const lane = song.tracks.find((t) => t.role === 'fx');
       const pool = (palette.effects ?? FX_IDS).filter((f) => !NO_THROW.has(f));
       if (!lane || pool.length === 0) return;

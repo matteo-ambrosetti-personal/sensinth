@@ -12,11 +12,15 @@ import {
   SensorHub,
   SensorRecorder,
   chiptune,
+  domainOf,
   keyCodeIndex,
   keyEffect,
   lofi,
+  minimal,
+  sensorEffect,
   stepDuration,
   techno,
+  timescaleOf,
   zoneOf,
   type DeterministicOptions,
   type NoteEvent,
@@ -66,6 +70,8 @@ interface Script {
   presses?: readonly SensorEvent[];
   /** Called after every step with its notes. */
   onStep?: (events: readonly NoteEvent[], engine: Engine) => void;
+  /** The page stalls at step `at`: the clock jumps `steps` steps ahead. */
+  stall?: { at: number; steps: number };
 }
 
 interface Take {
@@ -91,14 +97,28 @@ function take(
   const presses = [...(script.presses ?? [])].sort((a, b) => a.t - b.t);
   const out: Take = { events: [], versions: [], keys: [], engine };
   let sampleT = 0;
-  for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
-    const t = step * dt;
+  const feed = (t: number) => {
     for (; sampleT <= t; sampleT = Math.round((sampleT + 0.05) * 1000) / 1000) {
       hub.pushAll(script.sampleAt?.(sampleT) ?? []);
       while (presses.length > 0 && (presses[0] as SensorEvent).t <= sampleT) {
         hub.emit(presses.shift() as SensorEvent);
       }
     }
+  };
+  for (let step = 0; step < bars * STEPS_PER_BAR; step++) {
+    const stall = script.stall;
+    if (stall && step === stall.at) {
+      // What the sensors sent during the stall has arrived; then the clock jumps.
+      feed((step + stall.steps) * dt);
+      engine.skip(stall.steps, dt);
+      for (let s = step; s < step + stall.steps; s++) {
+        if (s % STEPS_PER_BAR !== 0) continue;
+        out.versions.push(engine.view().song?.version ?? '');
+        out.keys.push(engine.key);
+      }
+      step += stall.steps;
+    }
+    feed(step * dt);
     const events = engine.tick(dt);
     script.onStep?.(events, engine);
     out.events.push(...events);
@@ -118,6 +138,11 @@ function bars(events: readonly NoteEvent[], from: number, to: number): string[] 
   return events
     .filter((e) => e.step >= lo && e.step < hi)
     .map((e) => JSON.stringify({ ...e, step: e.step - lo }));
+}
+
+/** The notes from `step` on. */
+function after(events: readonly NoteEvent[], step: number): string[] {
+  return events.filter((e) => e.step >= step).map((e) => JSON.stringify(e));
 }
 
 /** Seconds at the middle of a bar. */
@@ -261,18 +286,24 @@ describe('Deterministic songs', () => {
 
   it('combine a sensor and a key, whatever came first', () => {
     const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
-    const bright = (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: 3000 }];
+    // The light is dark at Play, then turns bright: zones count from where a sensor started.
+    const brightAfter =
+      (at: number) =>
+      (t: number): SensorSample[] => [{ id: LIGHT.id, t, v: t > at ? 3000 : 0 }];
     const keyThenLight = take(chiptune, 8, o, {
       descriptors: [LIGHT],
-      sampleAt: (t) => (t > midBar(chiptune, 1) ? bright(t) : [{ id: LIGHT.id, t, v: 0 }]),
+      sampleAt: brightAfter(midBar(chiptune, 1)),
       presses: [key('KeyW', midBar(chiptune, 0))],
     });
     const lightThenKey = take(chiptune, 8, o, {
       descriptors: [LIGHT],
-      sampleAt: bright,
+      sampleAt: brightAfter(midBar(chiptune, 0)),
       presses: [key('KeyW', midBar(chiptune, 1))],
     });
-    const lightOnly = take(chiptune, 8, o, { descriptors: [LIGHT], sampleAt: bright });
+    const lightOnly = take(chiptune, 8, o, {
+      descriptors: [LIGHT],
+      sampleAt: brightAfter(midBar(chiptune, 0)),
+    });
     const keyOnly = take(chiptune, 8, o, { presses: [key('KeyW', midBar(chiptune, 0))] });
     const both = keyThenLight.versions[4];
     expect(lightThenKey.versions[4]).toBe(both);
@@ -378,6 +409,18 @@ describe('Deterministic songs', () => {
       const e = mapper.press({ id: KEYS.id, t: 0, kind: 'key', value: v, velocity: 1 }, KEYS.kind);
       expect(e && INSTRUMENT_EFFECTS.has(e.effect.id)).toBeFalsy();
     }
+    // A sensor given areas whose effects change instruments takes another of their effects.
+    for (let i = 0; i < 40; i++) {
+      const d: SensorDescriptor = {
+        id: `y.${i}`,
+        kind: 'pointer.y',
+        label: 'Y',
+        range: [0, 1],
+        rateHz: 30,
+      };
+      const m = mapper.sensor(d, 'medium', ['motion']);
+      expect(m && !INSTRUMENT_EFFECTS.has(m.map.effect.id), d.id).toBe(true);
+    }
   });
 
   it('give inputs the effects you choose, and their own repeat', () => {
@@ -453,5 +496,349 @@ describe('Deterministic songs', () => {
     expect(zoneOf(0.41, undefined)).toBe(2);
     expect(zoneOf(0.385, 2)).toBe(2);
     expect(zoneOf(0.35, 2)).toBe(1);
+  });
+
+  it('sound the same on every pass of the loop, humanized timing and noise included', () => {
+    const t = take(lofi, 8, { seed: 7, loopBars: 2 });
+    const pass = (from: number) =>
+      t.events
+        .filter((e) => e.step >= from * STEPS_PER_BAR && e.step < (from + 2) * STEPS_PER_BAR)
+        .map((e) => ({ ...e, step: 0 }));
+    expect(pass(2)).toEqual(pass(4));
+    expect(pass(4)).toEqual(pass(6));
+    expect(t.events.every((e) => e.loopStep === e.step % (2 * STEPS_PER_BAR))).toBe(true);
+  });
+
+  it('catch up after the clock stalls, as if it never had', () => {
+    const o = { seed: 3, loopBars: 4 };
+    const press = key('KeyQ', midBar(chiptune, 5));
+    const whole = take(chiptune, 8, o, { presses: [press] });
+    // The same run, with 11 steps skipped in bar 2.
+    const hub = new SensorHub();
+    hub.announce(KEYS);
+    const engine = new Engine({ style: chiptune, hub, deterministic: { ...o, origin: 0 } });
+    const dt = stepDuration(chiptune.defaultTempo);
+    const events: NoteEvent[] = [];
+    let pressed = false;
+    for (let step = 0; step < 8 * STEPS_PER_BAR; step++) {
+      if (step === 2 * STEPS_PER_BAR + 3) {
+        engine.skip(11, dt);
+        step += 11;
+      }
+      if (!pressed && step * dt >= press.t) {
+        hub.emit(press);
+        pressed = true;
+      }
+      events.push(...engine.tick(dt));
+    }
+    engine.dispose();
+    expect(bars(events, 3, 8)).toEqual(bars(whole.events, 3, 8));
+  });
+
+  it('catch up after a stall over a bar line: edits and generations land as if it never stalled', () => {
+    // A key pressed in bar 1 lands at bar 2, which the stall skips.
+    const o = { seed: 3, loopBars: 4 };
+    const presses = [key('KeyQ', (STEPS_PER_BAR + 4) * stepDuration(chiptune.defaultTempo))];
+    const whole = take(chiptune, 6, o, { presses });
+    const stalled = take(chiptune, 6, o, { presses, stall: { at: 28, steps: 8 } });
+    expect(whole.versions[2]).not.toBe('base');
+    expect(stalled.versions[2]).toBe(whole.versions[2]);
+    expect(after(stalled.events, 36)).toEqual(after(whole.events, 36));
+    // Evolve: the stall skips the start of generation 1 at bar 16.
+    const e = { seed: 9, loopBars: 4, evolve: true };
+    const grown = take(lofi, 20, e);
+    const late = take(lofi, 20, e, { stall: { at: 250, steps: 10 } });
+    expect(late.versions[16]).toBe('base.g1');
+    expect(after(late.events, 260)).toEqual(after(grown.events, 260));
+  });
+
+  it('count the zones a sensor crossed while the clock stalled', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'steps', repeat: 'accumulate' } as const;
+    const bar = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    // Tilted forward for half of bar 2, all of it inside the stall.
+    const script = {
+      descriptors: [TILT],
+      sampleAt: (t: number) => [{ id: TILT.id, t, v: t >= 2 * bar && t < 2.5 * bar ? 60 : 0 }],
+    };
+    const whole = take(chiptune, 8, o, script);
+    const stalled = take(chiptune, 8, o, { ...script, stall: { at: 30, steps: 14 } });
+    const edits = (t: Take) => t.engine.view().song?.edits.map((x) => `${x.input}×${x.count}`);
+    expect(edits(whole)).toEqual(['step:mac.pitch×4']);
+    expect(edits(stalled)).toEqual(edits(whole));
+    expect(after(stalled.events, 4 * STEPS_PER_BAR)).toEqual(
+      after(whole.events, 4 * STEPS_PER_BAR),
+    );
+  });
+
+  it('move a sensor to what it owns now when another source joins', () => {
+    const ROLL: SensorDescriptor = {
+      id: 'phone.roll',
+      kind: 'orientation.roll',
+      label: 'Roll',
+      group: 'motion',
+      range: [-90, 90],
+      rateHz: 50,
+    };
+    const joining: SensorDescriptor[] = [
+      { ...TILT, group: 'mac' },
+      {
+        id: 'cam.luma',
+        kind: 'camera.luma',
+        label: 'Camera brightness',
+        group: 'camera',
+        range: [0, 1],
+        rateHz: 10,
+      },
+    ];
+    const bar = STEPS_PER_BAR * stepDuration(chiptune.defaultTempo);
+    let alone: string | undefined;
+    const t = take(
+      chiptune,
+      6,
+      { seed: 42, loopBars: 4 },
+      {
+        descriptors: [ROLL, ...joining],
+        // The others send nothing until bar 2.
+        sampleAt: (time) => [
+          { id: ROLL.id, t: time, v: 0 },
+          ...(time >= 2 * bar
+            ? [
+                { id: TILT.id, t: time, v: 0 },
+                { id: 'cam.luma', t: time, v: 0.5 },
+              ]
+            : []),
+        ],
+        onStep: (_events, engine) => {
+          if (engine.view().snapshot.step === STEPS_PER_BAR) {
+            alone = engine.view().song?.sensors.find((x) => x.id === ROLL.id)?.effect.id;
+          }
+        },
+      },
+    );
+    expect(alone).toBe('mode');
+    const view = t.engine.view();
+    const areas = view.partition.groups
+      .flatMap((g) => g.channels)
+      .find((c) => c.id === ROLL.id)?.areas;
+    const domains = [...new Set((areas ?? []).map(domainOf))];
+    expect(domains.length).toBeGreaterThan(0);
+    const now = view.song?.sensors.find((x) => x.id === ROLL.id)?.effect;
+    expect(now).toEqual(sensorEffect(ROLL, timescaleOf(ROLL), domains)?.effect);
+  });
+
+  it('hear the seed’s own song while sensors stay where they were at Play', () => {
+    const o = { seed: 42, loopBars: 4, sensors: 'zones' } as const;
+    const tilted = take(chiptune, 8, o, {
+      descriptors: [TILT],
+      sampleAt: (t) => [{ id: TILT.id, t, v: 60 }],
+    });
+    expect(tilted.versions.every((v) => v === 'base')).toBe(true);
+    const off = take(
+      chiptune,
+      8,
+      { ...o, sensors: 'off' },
+      {
+        descriptors: [TILT],
+        sampleAt: (t) => [{ id: TILT.id, t, v: t > 1 ? 80 : -80 }],
+      },
+    );
+    expect(off.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('keep a compass steady around north', () => {
+    const HEADING: SensorDescriptor = {
+      id: 'phone.heading',
+      kind: 'heading',
+      label: 'Compass',
+      range: [0, 360],
+      circular: true,
+      rateHz: 20,
+    };
+    const t = take(
+      chiptune,
+      8,
+      { seed: 42, loopBars: 4 },
+      {
+        descriptors: [HEADING],
+        sampleAt: (time) => [
+          { id: HEADING.id, t: time, v: Math.round(time * 20) % 2 === 0 ? 359 : 1 },
+        ],
+      },
+    );
+    expect(t.versions.every((v) => v === 'base')).toBe(true);
+  });
+
+  it('give every continuous sensor an effect when several sources share the areas', () => {
+    const at = (d: SensorDescriptor, v: number) => ({ ...d, label: d.id, rateHz: 30, v });
+    const pointer = [
+      at(
+        {
+          id: 'computer.pointerSpeed',
+          kind: 'pointer.speed',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'computer.pointerX',
+          kind: 'pointer.x',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0.5,
+      ),
+      at(
+        {
+          id: 'computer.pointerY',
+          kind: 'pointer.y',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0.5,
+      ),
+      at(
+        {
+          id: 'computer.force',
+          kind: 'pointer.force',
+          group: 'pointer',
+          range: [0, 1],
+        } as SensorDescriptor,
+        0,
+      ),
+    ];
+    const motion = [
+      at(
+        {
+          id: 'phone.roll',
+          kind: 'orientation.roll',
+          group: 'motion',
+          range: [-90, 90],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'phone.tilt',
+          kind: 'orientation.pitch',
+          group: 'motion',
+          range: [-90, 90],
+        } as SensorDescriptor,
+        0,
+      ),
+      at(
+        {
+          id: 'phone.shake',
+          kind: 'motion.accel',
+          group: 'motion',
+          range: [0, 30],
+        } as SensorDescriptor,
+        0,
+      ),
+    ];
+    // Announced, but no fix yet: it can do nothing, so it takes nothing.
+    const place = at(
+      {
+        id: 'phone.place',
+        kind: 'geo.place',
+        group: 'location',
+        range: [0, 1],
+      } as SensorDescriptor,
+      0,
+    );
+    const live = [...pointer, ...motion];
+    for (const instruments of [true, false]) {
+      const t = take(
+        chiptune,
+        4,
+        { seed: 42, loopBars: 4, instruments },
+        {
+          descriptors: [...live, place],
+          sampleAt: (time) =>
+            live.map((d) => ({
+              id: d.id,
+              t: time,
+              v: d.id === 'computer.pointerY' && time > 1 ? 0.95 : d.v,
+            })),
+        },
+      );
+      const view = t.engine.view();
+      const listed = view.song?.sensors.map((x) => x.id) ?? [];
+      for (const id of ['computer.pointerX', 'computer.pointerY', 'phone.roll', 'phone.tilt']) {
+        expect(listed, `${id}, instruments ${instruments}`).toContain(id);
+      }
+      const sharing = view.partition.groups.flatMap((g) => g.channels.map((c) => c.id)).sort();
+      expect(sharing).toEqual([
+        'computer.pointerX',
+        'computer.pointerY',
+        'phone.roll',
+        'phone.tilt',
+      ]);
+      expect(
+        t.versions.slice(1).some((v) => v !== 'base'),
+        `instruments ${instruments}`,
+      ).toBe(true);
+    }
+  });
+
+  it('give number keys past the last track nothing to do', () => {
+    let seed = 1;
+    let tracks = 0;
+    for (; seed < 200; seed++) {
+      const probe = take(minimal, 1, { seed, loopBars: 2 });
+      tracks = probe.engine.view().tracks.filter((x) => x.role !== 'fx').length;
+      if (tracks < 6) break;
+    }
+    expect(tracks).toBeLessThan(6);
+    const o = { seed, loopBars: 2 };
+    const base = take(minimal, 6, o);
+    const pressed = take(minimal, 6, o, { presses: [key('Digit6', midBar(minimal, 0))] });
+    expect(bars(pressed.events, 2, 6)).toEqual(bars(base.events, 2, 6));
+    expect(pressed.engine.view().song?.edits[0]?.description).toMatch(/no such track/);
+  });
+
+  it('show an edit as pending, with what it does, until the bar it lands on', () => {
+    const o = { seed: 42, loopBars: 4 };
+    const pendings: { step: number; pending: number; atBar?: number; text?: string }[] = [];
+    const t = take(chiptune, 4, o, {
+      presses: [key('KeyQ', midBar(chiptune, 0))],
+      onStep: (_e, engine) => {
+        const song = engine.view().song;
+        const p = song?.pending[0];
+        pendings.push({
+          step: engine.snapshot().step,
+          pending: song?.pending.length ?? 0,
+          ...(p ? { atBar: p.atBar, ...(p.description ? { text: p.description } : {}) } : {}),
+        });
+      },
+    });
+    const waiting = pendings.filter((p) => p.pending > 0);
+    expect(waiting.length).toBeGreaterThan(0);
+    expect(waiting.every((p) => p.step < STEPS_PER_BAR && p.atBar === 1)).toBe(true);
+    expect(waiting[0]?.text).toMatch(/^Rewrite T1 · /);
+    expect(pendings.filter((p) => p.step >= STEPS_PER_BAR).every((p) => p.pending === 0)).toBe(
+      true,
+    );
+    expect(t.engine.view().song?.edits[0]?.description).toMatch(/^Rewrite T1 · /);
+  });
+
+  it('evolve the same way every time, each generation looping exactly', () => {
+    const o = { seed: 9, loopBars: 4, evolve: true };
+    const a = take(lofi, 40, o);
+    const b = take(lofi, 40, o);
+    expect(a.events).toEqual(b.events);
+    expect(a.versions[0]).toBe('base');
+    expect(a.versions[16]).toBe('base.g1');
+    expect(a.versions[32]).toBe('base.g2');
+    expect(bars(a.events, 16, 20)).toEqual(bars(a.events, 20, 24));
+    expect(bars(a.events, 16, 20)).not.toEqual(bars(a.events, 12, 16));
+    // Evolve off: the seed's song all the way.
+    const still = take(lofi, 40, { seed: 9, loopBars: 4 });
+    expect(still.versions.every((v) => v === 'base')).toBe(true);
+    // A press lands the same whenever it came, evolution or not.
+    const early = take(lofi, 28, o, { presses: [key('KeyW', midBar(lofi, 17))] });
+    const late = take(lofi, 28, o, { presses: [key('KeyW', midBar(lofi, 18))] });
+    expect(bars(early.events, 20, 28)).toEqual(bars(late.events, 20, 28));
   });
 });

@@ -151,6 +151,28 @@ not what was wanted, and 3.10 replaces it.
   media foreground service with a Stop notification and a wake lock; the phone's sensors keep
   reading while it plays.
 
+## Phase 3.12: a console you can watch, sensors that share, music that drifts (done)
+
+- **The screen:** a Pocket Operator–style pixel scene per style at the top of the page, with a
+  figure for each track (the hero jumps on the kick, the drummer rides the cymbal, the crowd
+  raises its hands on the clap…), the effects on the whole picture and a wipe at every new
+  section.
+- **Sensors share out the music:** ten areas in five domains (rhythm, harmony, sound, space,
+  motion) are dealt to the sources that are on, then to their sensors. One source alone drives
+  everything; several each get their own part. **Who drives what** shows it.
+- **Slow drift:** sections evolve the music instead of rewriting it, with a drift profile per
+  style, and **Drift** graphs how far each track has come.
+- **Deterministic mode you can follow:** a box on the screen says what an input will do and at
+  which bar, pending changes and zone meters in the Song panel, zones counted from Play,
+  _Sensors: off_, number keys past the last track do nothing, an optional reproducible
+  **Evolve**, identical loop passes and a clock that catches up after a stall.
+- **A 16-bit console look:** menu windows, pixel fonts, cartridges, A and B buttons.
+- **Fixes** from a code review: chords at section starts, stale harmony inputs, the scene riser,
+  the style picked while waiting, views that changed after they were handed out, mutations that
+  broke four on the floor or moved routes onto the FX lane, a double Play, mutes left on another
+  instrument, mouse clicks counted as hard presses, menus that swallowed keys, Flow's stale LFO
+  rows.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /

@@ -28,7 +28,11 @@ const CAPTURED_CODES = new Set([
   'Slash',
 ]);
 
-/** True when the key goes into a text field (the seed, a file name), not into the music. */
+/**
+ * True when the key goes into a field (the seed, a file name, a menu being
+ * stepped through), not into the music. A menu picked with the mouse hands
+ * the keys back (see main.ts).
+ */
 function typingIntoField(e: KeyboardEvent): boolean {
   const el = e.target as HTMLElement | null;
   if (!el || typeof el.closest !== 'function') return false;

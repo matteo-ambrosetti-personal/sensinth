@@ -1,4 +1,12 @@
-import { MACRO_INFO, MACROS, type MacroId, type Macros, type Router } from '@sensinth/core';
+import {
+  MACRO_AREA,
+  MACRO_INFO,
+  MACROS,
+  domainOf,
+  type MacroId,
+  type Macros,
+  type Router,
+} from '@sensinth/core';
 
 const LABELS: Record<MacroId, string> = {
   energy: 'Energy',
@@ -11,7 +19,7 @@ const LABELS: Record<MacroId, string> = {
   color: 'Color',
 };
 
-/** One meter per macro, with the sensors currently driving it. */
+/** One meter per macro, coloured by the area it belongs to, with the sensors driving it. */
 export class DialsView {
   private readonly rows = new Map<
     MacroId,
@@ -22,6 +30,7 @@ export class DialsView {
     for (const id of MACROS) {
       const li = document.createElement('li');
       li.className = 'dial';
+      li.dataset.domain = domainOf(MACRO_AREA[id]);
       li.title = MACRO_INFO[id].description;
       li.innerHTML = `
         <span class="dial-name">${LABELS[id]}</span>

@@ -7,9 +7,14 @@ async function dial(page: Page, name: string): Promise<number> {
 
 test('the sensor lab shows one sensor at a time and can solo it', async ({ page }) => {
   await page.goto('/');
-  if (!(await page.locator('#src-sim').isChecked())) {
-    await page.locator('label[for="src-sim"]').first().click();
+  // Only the simulated sensors, so they share out the whole music among themselves.
+  const on = page.locator('#sources input[type="checkbox"]:checked');
+  while ((await on.count()) > 0) {
+    const id = await on.first().getAttribute('id');
+    await page.locator(`label[for="${id}"]`).first().click();
+    await expect(page.locator(`#${id}`)).not.toBeChecked();
   }
+  await page.locator('label[for="src-sim"]').first().click();
   await expect(page.locator('#src-sim')).toBeChecked();
 
   await page.locator('#mode-lab').click();
@@ -36,11 +41,15 @@ test('the sensor lab shows one sensor at a time and can solo it', async ({ page 
     expect(inked).toBeGreaterThan(500);
   }
 
-  // Solo the shake sensor: register (driven by tilt) falls back to its resting value.
+  // Solo the shake sensor: alone, it drives every dial, the register too (tilt's job before).
   await page.selectOption('#lab-channel', 'sim.accel');
+  await expect(page.locator('#lab-drives')).not.toContainText('register');
   await page.locator('label:has(#lab-solo)').click();
   await expect(page.locator('#lab-solo')).toBeChecked();
-  await expect.poll(() => dial(page, 'Register'), { timeout: 15000 }).toBe(50);
+  for (const dialName of ['energy', 'register', 'space', 'tension']) {
+    await expect(page.locator('#lab-drives')).toContainText(dialName);
+  }
+  await expect.poll(() => dial(page, 'Register'), { timeout: 15000 }).not.toBe(50);
 
   // Back to Play: solo ends and the play controls return.
   await page.locator('#mode-play').click();

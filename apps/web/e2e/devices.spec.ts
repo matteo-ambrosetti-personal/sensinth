@@ -81,13 +81,25 @@ async function turnOn(page: Page, id: string): Promise<void> {
   await expect(page.locator(`#src-${id}`)).toBeChecked();
 }
 
+/** Turns every other source off, so this one drives the whole music on its own. */
+async function only(page: Page, id: string): Promise<void> {
+  const on = page.locator('#sources input[type="checkbox"]:checked');
+  while ((await on.count()) > 0) {
+    const other = await on.first().getAttribute('id');
+    await page.locator(`label[for="${other}"]`).first().click();
+    await expect(page.locator(`#${other}`)).not.toBeChecked();
+  }
+  await turnOn(page, id);
+}
+
 test.beforeEach(async ({ page }) => {
   await fakeHardware(page);
   await page.goto('/');
 });
 
 test('the MacBook lid angle arrives over WebHID', async ({ page }) => {
-  await turnOn(page, 'lid');
+  // On its own the lid drives everything, the space dial its rules give it included.
+  await only(page, 'lid');
   const row = sensorRow(page, 'Lid angle');
   await expect(row).toBeVisible();
   await expect(row.locator('.sensor-value')).toContainText('°');
@@ -105,7 +117,11 @@ test('a game controller becomes sticks, a trigger and buttons', async ({ page })
   await expect(sensorRow(page, 'Test Pad: right trigger')).toBeVisible();
   const buttons = sensorRow(page, 'Test Pad: buttons');
   await expect(buttons).toBeVisible();
-  await expect(buttons.locator('.sensor-routes')).toContainText('onset → accent');
+  // The controller's sensors share out what the controller controls: each has its own areas.
+  for (const name of ['Test Pad: Left stick x', 'Test Pad: right trigger', 'Test Pad: buttons']) {
+    await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
+  }
+  await expect(page.locator('#areas .area-group[data-group="gamepad"]')).toBeVisible();
 });
 
 test('turning a MIDI knob adds a channel for it', async ({ page }) => {
@@ -120,7 +136,7 @@ test('turning a MIDI knob adds a channel for it', async ({ page }) => {
 });
 
 test('CPU pressure reads as load', async ({ page }) => {
-  await turnOn(page, 'cpu');
+  await only(page, 'cpu');
   const row = sensorRow(page, 'CPU pressure');
   await expect(row).toBeVisible();
   await expect(row.locator('.sensor-value')).toHaveText(/0\.75/);

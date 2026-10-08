@@ -15,7 +15,10 @@ import { ScreenWakeLock } from './wakeLock';
 
 /** What deterministic mode is set to: the seed, the loop and how inputs act. */
 export type SongSettings = Required<
-  Pick<DeterministicOptions, 'seed' | 'loopBars' | 'repeat' | 'sensors' | 'instruments' | 'mapping'>
+  Pick<
+    DeterministicOptions,
+    'seed' | 'loopBars' | 'repeat' | 'sensors' | 'instruments' | 'mapping' | 'evolve'
+  >
 >;
 
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
@@ -49,10 +52,19 @@ export class Player {
   /** Times (sensor clock) of recently scheduled drum hits. */
   private recentHits: number[] = [];
   private soloId: string | undefined;
-  private readonly muted = new Set<string>();
-  /** Engine views waiting for their step to sound, oldest first. */
-  private views: { time: number; view: EngineView }[] = [];
+  /** Muted track slots, with the instrument each held when it was muted. */
+  private readonly muted = new Map<string, string | undefined>();
+  /** Engine views waiting for their step to sound, oldest first, with the step's notes. */
+  private views: { time: number; view: EngineView; events: readonly NoteEvent[] }[] = [];
   private current: EngineView | undefined;
+  private currentEvents: readonly NoteEvent[] = [];
+  /** A start in progress (the audio context resuming), so a second click does not start twice. */
+  private starting: Promise<void> | undefined;
+  /** Stop was pressed while the audio was still starting: it stops once it has. */
+  private stopAsked = false;
+  private restarting = false;
+  /** Each track slot's instrument, as the renderer was last told. */
+  private machines = new Map<string, string>();
   /** Pitch class to start each new piece in, e.g. from the current place. */
   keyHint: () => number | undefined = () => undefined;
   /** Deterministic mode and its settings, applied at the next Play. */
@@ -103,8 +115,13 @@ export class Player {
   idleUpdate(dt: number): void {
     if (!this.playing) {
       this.hub.markStale(nowSeconds());
-      this.engine.router.update(dt);
+      this.engine.idle(dt);
     }
+  }
+
+  /** Who controls what, while stopped too. */
+  partition(): EngineView['partition'] {
+    return this.engine.partitionInfo;
   }
 
   snapshot(): EngineSnapshot | undefined {
@@ -116,9 +133,22 @@ export class Player {
     if (!this.playing || !this.ctx) return undefined;
     const now = this.ctx.currentTime;
     while (this.views.length > 0 && (this.views[0] as { time: number }).time <= now) {
-      this.current = this.views.shift()?.view;
+      const next = this.views.shift();
+      this.current = next?.view;
+      this.currentEvents = next?.events ?? [];
     }
     return this.current;
+  }
+
+  /** The notes of the step sounding now. */
+  events(): readonly NoteEvent[] {
+    this.view();
+    return this.playing ? this.currentEvents : [];
+  }
+
+  /** True while a deterministic song plays (not just while the setting is on). */
+  get playingDeterministic(): boolean {
+    return this.playing && this.engine.seed !== undefined;
   }
 
   /** Turns deterministic mode on with its settings, or off; takes effect at the next Play. */
@@ -133,9 +163,18 @@ export class Player {
   /** Must be called from a user gesture (browsers block audio otherwise). */
   async start(): Promise<void> {
     if (this.playing) return;
-    await this.begin();
+    if (this.starting) return this.starting;
+    this.stopAsked = false;
+    this.starting = this.begin().finally(() => (this.starting = undefined));
+    await this.starting;
+    if (!this.playing) return;
     void this.wakeLock.enable();
     this.background.enable();
+  }
+
+  /** True while Start over waits for the audio to start again: the music is still on, for the user. */
+  get isRestarting(): boolean {
+    return this.restarting;
   }
 
   /**
@@ -143,12 +182,21 @@ export class Player {
    * the seed's own song with every change undone. Also from a user gesture.
    */
   async restart(): Promise<void> {
+    if (this.starting) await this.starting;
     if (!this.playing) return this.start();
     this.halt();
-    await this.begin();
+    this.stopAsked = false;
+    this.restarting = true;
+    this.starting = this.begin().finally(() => {
+      this.starting = undefined;
+      this.restarting = false;
+    });
+    await this.starting;
   }
 
   stop(): void {
+    if (this.starting) this.stopAsked = true;
+    this.restarting = false;
     this.halt();
     void this.wakeLock.disable();
     this.background.disable();
@@ -156,7 +204,18 @@ export class Player {
 
   private async begin(): Promise<void> {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
-    await ctx.resume();
+    try {
+      await ctx.resume();
+    } catch (err) {
+      void ctx.close();
+      throw err;
+    }
+    if (this.stopAsked) {
+      // Stop came while the audio was starting.
+      this.stopAsked = false;
+      void ctx.close();
+      return;
+    }
     this.ctx = ctx;
     // Step 0 sounds START_DELAY from now.
     const origin = nowSeconds() + START_DELAY;
@@ -165,6 +224,7 @@ export class Player {
     this.engine = this.newEngine(this.seeded ? origin : undefined);
     this.views = [];
     this.current = undefined;
+    this.currentEvents = [];
 
     this.scope = ctx.createAnalyser();
     this.scope.fftSize = 2048;
@@ -173,14 +233,16 @@ export class Player {
     out.connect(this.scope);
     const renderer = new Renderer(ctx, this.style, out);
     renderer.setTempo(this.bpm);
-    for (const slot of this.muted) renderer.setMuted(slot, true);
+    for (const slot of this.muted.keys()) renderer.setMuted(slot, true);
     this.renderer = renderer;
 
     let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
-    scheduler.onStep = (_step, time, stepSeconds) => {
+    scheduler.onStep = (_step, time, stepSeconds, skipped) => {
       // Away from the screen the system may pause some sensors: they hold their last reading.
       if (document.visibilityState !== 'hidden') this.hub.markStale(nowSeconds());
+      // The page stalled and the clock jumped: the music's own clock jumps with it.
+      if (skipped > 0) this.engine.skip(skipped, stepSeconds);
       const events = this.engine.tick(stepSeconds);
       // The engine changes style on a bar line; follow it there.
       if (this.engine.currentStyle !== this.style) {
@@ -190,7 +252,9 @@ export class Player {
       if (this.engine.genomeVersion !== version) {
         version = this.engine.genomeVersion;
         renderer.setFx(this.engine.fx);
-        renderer.setTracks(this.engine.trackMachines());
+        const machines = this.engine.trackMachines();
+        renderer.setTracks(machines);
+        this.followMachines(machines);
       }
       const view = this.engine.view();
       renderer.update(
@@ -203,7 +267,7 @@ export class Player {
         time,
       );
       renderer.schedule(events, time, stepSeconds);
-      this.views.push({ time, view });
+      this.views.push({ time, view, events });
       if (this.views.length > MAX_QUEUED_VIEWS) this.views.shift();
       this.noteHits(events, time - ctx.currentTime);
     };
@@ -224,6 +288,7 @@ export class Player {
     this.renderer = undefined;
     this.views = [];
     this.current = undefined;
+    this.currentEvents = [];
     const ctx = this.ctx;
     this.ctx = undefined;
     if (ctx) setTimeout(() => void ctx.close(), 400);
@@ -236,9 +301,22 @@ export class Player {
   }
 
   setMuted(slot: string, muted: boolean): void {
-    if (muted) this.muted.add(slot);
+    if (muted) this.muted.set(slot, this.machines.get(slot));
     else this.muted.delete(slot);
     this.renderer?.setMuted(slot, muted);
+  }
+
+  /**
+   * A mute belongs to the instrument that was muted: when a slot gets
+   * another instrument (a new piece, a new scene), it plays again.
+   */
+  private followMachines(machines: readonly { slot: string; machineId: string }[]): void {
+    this.machines = new Map(machines.map((m) => [m.slot, m.machineId]));
+    for (const [slot, machine] of [...this.muted]) {
+      const now = this.machines.get(slot);
+      if (machine === undefined) this.muted.set(slot, now);
+      else if (now !== machine) this.setMuted(slot, false);
+    }
   }
 
   isMuted(slot: string): boolean {

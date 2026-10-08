@@ -14,6 +14,8 @@ export interface Prefs {
   sensors?: string;
   /** False keeps the seed's instruments. */
   instruments?: boolean;
+  /** The seed's song evolves, the same way every time. */
+  evolve?: boolean;
   /** Your own effect and repeat per input, by row id. */
   inputMap?: InputMap;
 }

@@ -10,6 +10,7 @@ export const minimal: Style = {
   name: 'Minimal',
   description: 'Marimba and piano cells on a steady pulse, drifting out of phase and back.',
   defaultTempo: 120,
+  drift: { phase: 2.5, pattern: 0.8, machine: 0.1, harmony: 0.6, sound: 0.8 },
   palette: {
     modes: ['dorian', 'mixolydian', 'ionian', 'lydian'],
     progression: {

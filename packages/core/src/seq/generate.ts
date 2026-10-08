@@ -21,6 +21,8 @@ export interface GenerateOptions {
   palette: Palette;
   /** 0..1: how busy the pattern is inside the machine's density range. */
   density: number;
+  /** The palette slot the track fills (see `TrackSpec.option`). */
+  option?: number;
 }
 
 /** Params a p-lock may set. */
@@ -69,8 +71,67 @@ export function generateTrack(rng: Rng, o: GenerateOptions): TrackSpec {
   if (machine.pentatonic) spec.pentatonic = true;
   if (machine.fifth) spec.fifth = true;
   if (machine.blueNotes) spec.blueNotes = true;
+  if (o.option !== undefined) spec.option = o.option;
+  if (machine.rhythm && machine.rhythm !== 'euclid') spec.rhythm = machine.rhythm;
   spec.trigs = writePattern(rng, spec, machine, o.density);
   return spec;
+}
+
+/** Steps after which a rhythm template repeats. */
+const TEMPLATE_PERIOD: Partial<Record<RhythmHint, number>> = {
+  four: 4,
+  offbeat: 4,
+  backbeat: 8,
+  pulse: 2,
+  ride: 16,
+  break: 16,
+  walking: 4,
+  charleston: 16,
+};
+
+/** How many steps a track's template repeats after, 1 for tracks with no template. */
+export function templatePeriod(spec: TrackSpec): number {
+  const p = spec.rhythm ? (TEMPLATE_PERIOD[spec.rhythm] ?? 1) : 1;
+  return spec.rhythm === 'break' && spec.voice === 'kick' ? 32 : p;
+}
+
+/** True when step `i` is one a track's rhythm template always plays. */
+function onTemplate(spec: TrackSpec, i: number): boolean {
+  const s = i % 16;
+  switch (spec.rhythm) {
+    case 'four':
+    case 'walking':
+      return i % 4 === 0;
+    case 'offbeat':
+      return i % 4 === 2;
+    case 'backbeat':
+      return i % 8 === 4;
+    case 'pulse':
+      return i % 2 === 0;
+    case 'ride':
+      return [0, 4, 6, 8, 12, 14].includes(s);
+    case 'break':
+      if (spec.voice === 'snare' || spec.voice === 'clap') return i % 8 === 4;
+      if (spec.voice === 'kick') return s === 0 || s === 10;
+      return false;
+    case 'charleston':
+      return s === 0 || s === 6;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Steps that hold a pattern together and that mutations and evolution keep:
+ * the downbeat of drums and bass, and every hit of a rhythm template (the
+ * kick of four on the floor, the backbeat, the ride figure…).
+ */
+export function anchorSteps(spec: TrackSpec): Set<number> {
+  const out = new Set<number>();
+  if (spec.role !== 'drum' && spec.role !== 'bass') return out;
+  if (spec.trigs[0]) out.add(0);
+  for (let i = 0; i < spec.length; i++) if (spec.trigs[i] && onTemplate(spec, i)) out.add(i);
+  return out;
 }
 
 /** A fresh pattern for an existing track (same machine, length and speed). */
