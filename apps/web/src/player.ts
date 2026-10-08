@@ -60,6 +60,9 @@ export class Player {
   private currentEvents: readonly NoteEvent[] = [];
   /** A start in progress (the audio context resuming), so a second click does not start twice. */
   private starting: Promise<void> | undefined;
+  /** Stop was pressed while the audio was still starting: it stops once it has. */
+  private stopAsked = false;
+  private restarting = false;
   /** Each track slot's instrument, as the renderer was last told. */
   private machines = new Map<string, string>();
   /** Pitch class to start each new piece in, e.g. from the current place. */
@@ -161,10 +164,17 @@ export class Player {
   async start(): Promise<void> {
     if (this.playing) return;
     if (this.starting) return this.starting;
+    this.stopAsked = false;
     this.starting = this.begin().finally(() => (this.starting = undefined));
     await this.starting;
+    if (!this.playing) return;
     void this.wakeLock.enable();
     this.background.enable();
+  }
+
+  /** True while Start over waits for the audio to start again: the music is still on, for the user. */
+  get isRestarting(): boolean {
+    return this.restarting;
   }
 
   /**
@@ -175,11 +185,18 @@ export class Player {
     if (this.starting) await this.starting;
     if (!this.playing) return this.start();
     this.halt();
-    this.starting = this.begin().finally(() => (this.starting = undefined));
+    this.stopAsked = false;
+    this.restarting = true;
+    this.starting = this.begin().finally(() => {
+      this.starting = undefined;
+      this.restarting = false;
+    });
     await this.starting;
   }
 
   stop(): void {
+    if (this.starting) this.stopAsked = true;
+    this.restarting = false;
     this.halt();
     void this.wakeLock.disable();
     this.background.disable();
@@ -192,6 +209,12 @@ export class Player {
     } catch (err) {
       void ctx.close();
       throw err;
+    }
+    if (this.stopAsked) {
+      // Stop came while the audio was starting.
+      this.stopAsked = false;
+      void ctx.close();
+      return;
     }
     this.ctx = ctx;
     // Step 0 sounds START_DELAY from now.

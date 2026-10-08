@@ -16,7 +16,7 @@ export const ambient: Scene = {
   name: 'Ambient',
   cast: [
     { key: 'aurora', want: ['pad', 'chords'] },
-    { key: 'moon', want: ['pad', 'chords', 'bass'] },
+    { key: 'moon', want: ['drone', 'pad', 'chords', 'bass'] },
     { key: 'stars', want: ['lead', 'arp'] },
     { key: 'ripples', want: ['arp', 'lead', 'tonal'] },
     { key: 'firefly', want: ['drums'] },

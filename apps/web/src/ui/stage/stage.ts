@@ -20,6 +20,7 @@ export type Want =
   | 'arp'
   | 'chords'
   | 'pad'
+  | 'drone'
   | 'drums'
   | 'tonal'
   | 'any';
@@ -51,6 +52,9 @@ export interface ActorState {
   /** Seconds left of a "!" over it: an edit just landed on it. */
   mark: number;
 }
+
+/** Seconds a "!" stays over a figure after an edit lands on its track. */
+const MARK_SECONDS = 1.6;
 
 export interface SceneState {
   g: Gfx;
@@ -139,8 +143,9 @@ function kindOf(t: TrackView): Want | undefined {
     case 'chords':
       return 'chords';
     case 'pad':
-    case 'drone':
       return 'pad';
+    case 'drone':
+      return 'drone';
     default:
       return undefined;
   }
@@ -151,6 +156,8 @@ function matches(kind: Want, want: Want): boolean {
   if (want === 'drums')
     return kind === 'kick' || kind === 'snare' || kind === 'hats' || kind === 'perc';
   if (want === 'tonal') return !['kick', 'snare', 'hats', 'perc'].includes(kind);
+  // A drone can stand in for a pad (a part that wants a drone takes only a drone).
+  if (want === 'pad') return kind === 'pad' || kind === 'drone';
   return kind === want;
 }
 
@@ -176,6 +183,8 @@ export class Stage {
   private lastRebuild = -1;
   private zTimer = 0;
   private label = '';
+  /** When an edit last landed on each track (performance.now() ms): marks follow the clock. */
+  private landed = new Map<string, number>();
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     canvas.width = STAGE_W;
@@ -186,20 +195,25 @@ export class Stage {
     this.scene = SCENES.free as Scene;
     const fit = () => {
       const box = canvas.parentElement?.clientWidth ?? STAGE_W;
-      // Whole pixels where there is room for at least twice the size; else fill the width.
-      const scale = Math.min(4, Math.floor(box / STAGE_W));
-      canvas.style.width = scale >= 2 ? `${STAGE_W * scale}px` : '100%';
+      // Whole device pixels per stage pixel, so the pixel art stays even on a phone's 2.625
+      // or 3 too: at least two, at most four CSS pixels' worth; with less room, fill the width.
+      const dpr = window.devicePixelRatio || 1;
+      const k = Math.min(Math.floor(4 * dpr), Math.floor((box * dpr) / STAGE_W));
+      canvas.style.width = k >= 2 ? `${(STAGE_W * k) / dpr}px` : '100%';
     };
     if (canvas.parentElement) new ResizeObserver(fit).observe(canvas.parentElement);
+    // Zooming or moving to another screen changes the device pixel ratio.
+    window.addEventListener('resize', fit);
     fit();
   }
 
-  /** An edit just landed on these tracks: a "!" over their figures. */
-  react(slots: readonly string[]): void {
-    for (const slot of slots) {
-      const s = this.states.get(slot);
-      if (s) s.mark = 1.6;
-    }
+  /**
+   * An edit just landed on these tracks: a "!" over their figures for a
+   * moment, by the clock (so one that landed while the screen was not drawn,
+   * or on a track that just joined, shows for what is left of it).
+   */
+  react(slots: readonly string[], now = performance.now()): void {
+    for (const slot of slots) this.landed.set(slot, now);
   }
 
   frame(input: StageInput, now: number): void {
@@ -225,6 +239,8 @@ export class Stage {
     ctx.save();
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    // A clean slate: nothing from the last frame (or the last scene) shows through.
+    g.rect(0, 0, g.w, g.h, '#000');
     const shake = fx.has('stutter') ? Math.round((noise(Math.floor(now / 40)) - 0.5) * 4) : 0;
     ctx.translate(shake, 0);
     this.places.clear();
@@ -266,7 +282,7 @@ export class Stage {
     this.effects(fx, now, state.beats);
     this.transition(view, dt);
     this.hud(input, view);
-    this.describe(input);
+    this.describe(input, view);
   }
 
   /** Follows the tracks: who plays which part, and every new hit. */
@@ -286,7 +302,11 @@ export class Stage {
     for (const s of this.states.values()) {
       s.hit *= decay;
       s.fresh = false;
-      s.mark = Math.max(0, s.mark - dt);
+      const at = this.landed.get(s.slot);
+      s.mark = at === undefined ? 0 : Math.max(0, MARK_SECONDS - (now - at) / 1000);
+    }
+    for (const [slot, at] of this.landed) {
+      if (now - at > MARK_SECONDS * 1000) this.landed.delete(slot);
     }
     for (const t of tracks) {
       const s = this.states.get(t.slot);
@@ -330,7 +350,9 @@ export class Stage {
     const free = tracks.map((t) => ({ t, kind: kindOf(t) })).filter((x) => x.kind !== undefined);
     for (const slot of this.scene.cast) {
       for (const want of slot.want) {
-        const i = free.findIndex((x) => matches(x.kind as Want, want));
+        // The part it asks for first, else one that can stand in (a drone for a pad).
+        let i = free.findIndex((x) => x.kind === want);
+        if (i < 0) i = free.findIndex((x) => matches(x.kind as Want, want));
         if (i < 0) continue;
         const [taken] = free.splice(i, 1);
         if (taken) this.binding.set(slot.key, taken.t.slot);
@@ -477,14 +499,23 @@ export class Stage {
     g.text(right, g.w - g.textWidth(right) - 3, 3, '#ffffff', 1, '#000000');
   }
 
-  /** The screen in words, for screen readers, now and then. */
-  private describe(input: StageInput): void {
-    const band = this.scene.cast
+  /** The screen in words, for screen readers; it changes only when the band does. */
+  private describe(input: StageInput, view: EngineView | undefined): void {
+    const parts = this.scene.cast
       .map((c) => this.binding.get(c.key))
-      .flatMap((slot) => (slot ? [this.states.get(slot)?.label ?? slot] : []));
+      .flatMap((slot) =>
+        slot && this.states.get(slot) ? [this.states.get(slot) as ActorState] : [],
+      );
+    const playing = parts.filter((s) => !s.muted).map((s) => s.label);
+    const resting = parts.filter((s) => s.muted).map((s) => s.label);
     const label = !input.playing
       ? `${input.styleName}: the band waits for Play`
-      : `${this.scene.name}: ${band.length > 0 ? band.join(', ') : 'nobody'} playing`;
+      : !view
+        ? `${input.styleName}: starting`
+        : view.snapshot.waiting
+          ? `${this.scene.name}: waiting for a sensor`
+          : `${this.scene.name}: ${playing.length > 0 ? playing.join(', ') : 'nobody'} playing` +
+            (resting.length > 0 ? `; ${resting.join(', ')} resting` : '');
     if (label !== this.label) {
       this.label = label;
       this.canvas.setAttribute('aria-label', label);

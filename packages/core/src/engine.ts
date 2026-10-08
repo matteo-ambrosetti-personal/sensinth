@@ -735,16 +735,21 @@ export class Engine {
     }
     // Evolve: a new generation starts on a loop start.
     const ev = det.evolve;
+    let evolved = false;
     if (ev) {
       const k = Math.floor(Math.floor(step / STEPS_PER_BAR) / ev.bars);
-      if (k !== ev.k) reason ??= 'evolve';
+      evolved = k !== ev.k;
       while (ev.k < k) {
         ev.k++;
         ev.spec = evolveBase(ev.spec, ev.k, det.instruments);
       }
     }
     const edits = det.tracker.edits();
-    const version = editsVersion(edits) + (ev && ev.k > 0 ? `.g${ev.k}` : '');
+    const editsId = editsVersion(edits);
+    const version = editsId + (ev && ev.k > 0 ? `.g${ev.k}` : '');
+    // An edit that lands as a generation starts is an edit first (the generation shows in the version).
+    if (editsId !== det.version.replace(/\.g\d+$/, '')) reason ??= 'edit';
+    if (evolved) reason ??= 'evolve';
     if (version !== det.version) reason ??= 'edit';
     if (reason) {
       const song = buildSong(ev?.spec ?? det.base, edits);

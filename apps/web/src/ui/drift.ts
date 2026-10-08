@@ -5,9 +5,11 @@ import { theme, trackColor } from './theme';
 const PIXEL = 2;
 /** Bars always shown, so the first minutes do not stretch across the chart. */
 const MIN_BARS = 32;
+/** Bars kept: the engine's own window. Older bars scroll off the left. */
+const MAX_BARS = 512;
 
 interface Series {
-  /** Distance at each bar, by bar index (gaps while a track was absent). */
+  /** Distance at each bar from `first` on (gaps while a track was absent). */
   values: (number | undefined)[];
 }
 
@@ -21,7 +23,11 @@ export class DriftChart {
   private total: (number | undefined)[] = [];
   private tracks = new Map<string, Series>();
   private marks: EngineView['drift']['marks'] = [];
+  /** The bar the series start at, once older ones have scrolled off. */
+  private first = 0;
   private lastBar = -1;
+  /** True once stopped: the next piece starts a chart of its own. */
+  private stopped = true;
   private dirty = true;
   private width = 0;
   private height = 0;
@@ -44,19 +50,23 @@ export class DriftChart {
   }
 
   update(view: EngineView | undefined): void {
+    // The chart of the last piece stays up after Stop, until the next one starts.
+    if (!view) this.stopped = true;
     const d = view?.drift;
     if (d && d.history.length > 0) {
-      // A new piece starts its own chart.
-      if (d.bar < this.lastBar || (d.bar === 0 && this.lastBar > 0)) this.reset();
+      if (this.stopped || d.bar < this.lastBar) this.reset();
+      this.stopped = false;
       if (d.bar !== this.lastBar) {
         this.lastBar = d.bar;
-        this.total[d.bar] = d.total;
+        const i = d.bar - this.first;
+        this.total[i] = d.total;
         for (const t of d.tracks) {
           if (t.gone) continue;
           const s = this.tracks.get(t.slot) ?? { values: [] };
-          s.values[d.bar] = t.value;
+          s.values[i] = t.value;
           this.tracks.set(t.slot, s);
         }
+        this.trim();
         this.marks = d.marks;
         this.dirty = true;
         const pct = `${Math.round(d.total * 100)}%`;
@@ -74,7 +84,20 @@ export class DriftChart {
     this.total = [];
     this.tracks.clear();
     this.marks = [];
+    this.first = 0;
     this.lastBar = -1;
+  }
+
+  /** Keeps the last `MAX_BARS` bars, so a long piece's redraw stays quick. */
+  private trim(): void {
+    const n = this.total.length - MAX_BARS;
+    if (n <= 0) return;
+    this.total.splice(0, n);
+    for (const [slot, s] of this.tracks) {
+      s.values.splice(0, n);
+      if (!s.values.some((v) => v !== undefined)) this.tracks.delete(slot);
+    }
+    this.first += n;
   }
 
   private draw(): void {
@@ -101,8 +124,9 @@ export class DriftChart {
 
     // Marks under the axis: sections, scenes, edits, evolutions.
     for (const m of this.marks) {
-      if (m.bar < 0 || m.bar >= bars) continue;
-      const x = xOf(m.bar);
+      const bar = m.bar - this.first;
+      if (bar < 0 || bar >= bars) continue;
+      const x = xOf(bar);
       if (m.reason === 'scene') {
         ctx.fillStyle = t.accent;
         star(ctx, x, bottom + 3);

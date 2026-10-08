@@ -48,18 +48,27 @@ export class ChangesView {
     const gen = song.evolve ? ` · generation ${song.evolve.generation}` : '';
     this.loop.textContent = `Bar ${song.loopBar + 1} of ${song.loopBars} · ${version}${gen}`;
 
-    const pendingKey = song.pending.map((p) => `${p.input}:${p.count}:${p.atBar}`).join('|');
+    // Each list redraws when what it shows changes: a new style renames the instruments an
+    // edit lands on without changing the edits, and a sensor's effect follows its areas.
+    const pendingKey = song.pending
+      .map((p) => `${p.input}:${p.count}:${p.atBar}:${p.description ?? ''}`)
+      .join('|');
     if (pendingKey !== this.shownPending) {
       this.shownPending = pendingKey;
       this.pending.replaceChildren(...song.pending.map((p) => pendingItem(p, song.loopBars)));
     }
-    if (song.version !== this.shown) {
-      this.shown = song.version;
+    const editsKey = song.edits
+      .map((e) => `${e.input}:${e.count}:${e.zone ?? ''}:${e.description ?? ''}`)
+      .join('|');
+    if (`${song.version}|${editsKey}` !== this.shown) {
+      this.shown = `${song.version}|${editsKey}`;
       this.list.replaceChildren(...song.edits.map(editItem));
     }
     this.empty.hidden = song.edits.length > 0 || song.pending.length > 0;
 
-    const zonesKey = song.sensors.map((z) => `${z.id}:${z.zone}:${z.sensors}`).join('|');
+    const zonesKey = song.sensors
+      .map((z) => `${z.id}:${z.zone}:${z.start}:${z.sensors}:${JSON.stringify(z.effect)}`)
+      .join('|');
     if (zonesKey !== this.shownZones) {
       this.shownZones = zonesKey;
       this.zones.replaceChildren(...song.sensors.map(zoneItem));

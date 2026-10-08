@@ -1,7 +1,9 @@
-import type { EngineView, PendingEdit } from '@sensinth/core';
+import type { EditView, EngineView, PendingEdit } from '@sensinth/core';
 
 /** How long a "landed" message stays up, in milliseconds. */
 const LANDED_MS = 2600;
+/** Lines the banner shows at most; the rest are counted. */
+const MAX_LINES = 4;
 
 /** Something that just happened, for the screen and the track rows. */
 export interface Landed {
@@ -19,6 +21,8 @@ export class BannerView {
   private landedUntil = 0;
   private landed: { text: string; kind: string }[] = [];
   private lastVersion = '';
+  /** The edits in effect after the last version, by input, to tell what a new one changed. */
+  private lastEdits = new Map<string, EditView>();
   private lastRebuild = -1;
   private shown = '';
 
@@ -29,6 +33,7 @@ export class BannerView {
     let out: Landed | undefined;
     if (!view || view.snapshot.waiting) {
       this.lastVersion = '';
+      this.lastEdits = new Map();
       this.lastRebuild = -1;
       this.lines = [];
       this.landedUntil = 0;
@@ -39,17 +44,25 @@ export class BannerView {
         this.lines = song.pending.map((p) => pendingLine(p, song.loopBars));
         if (song.version !== this.lastVersion) {
           const first = this.lastVersion === '';
+          const before = this.lastVersion;
+          const was = this.lastEdits;
           this.lastVersion = song.version;
+          this.lastEdits = new Map(song.edits.map((e) => [e.input, e]));
           if (!first) {
-            const what =
-              r.reason === 'evolve'
-                ? `▸ The song evolved: generation ${song.evolve?.generation ?? 0}`
-                : song.version === 'base' || song.version.startsWith('base.')
+            // The version is the edits' part, then the generation's (`1f2946.g2`): either can move.
+            const edited = editsPart(song.version) !== editsPart(before);
+            const gen = song.evolve?.generation ?? 0;
+            const evolved = song.evolve !== undefined && generationOf(before) !== gen;
+            const n = song.edits.length;
+            const what = !edited
+              ? `▸ The song evolved: generation ${gen}`
+              : (editsPart(song.version) === 'base'
                   ? '▸ Back to the seed’s song'
-                  : `▸ New song ${song.version} · ${song.edits.length} change${song.edits.length === 1 ? '' : 's'}`;
+                  : `▸ New song ${song.version} · ${n} change${n === 1 ? '' : 's'}`) +
+                (evolved ? ` · generation ${gen}` : '');
             this.landed = [{ text: what, kind: 'is-landed' }];
             this.landedUntil = now + LANDED_MS;
-            out = { slots: [...new Set(song.edits.flatMap((e) => e.slots ?? []))] };
+            out = { slots: changedSlots(was, this.lastEdits) };
           }
         }
       } else if (r.step !== this.lastRebuild) {
@@ -68,8 +81,16 @@ export class BannerView {
     if (key !== this.shown) {
       this.shown = key;
       this.el.hidden = all.length === 0;
+      // Too many to show: the newest stay, the others are counted.
+      const shown =
+        all.length > MAX_LINES
+          ? [
+              { text: `+${all.length - MAX_LINES + 1} more`, kind: 'is-more' },
+              ...all.slice(-(MAX_LINES - 1)),
+            ]
+          : all;
       this.el.replaceChildren(
-        ...all.slice(-4).map((l) => {
+        ...shown.map((l) => {
           const p = document.createElement('span');
           p.className = l.kind;
           p.textContent = l.text;
@@ -79,6 +100,33 @@ export class BannerView {
     }
     return out;
   }
+}
+
+/** The edits' part of a song version: `base`, or the edits' id. */
+function editsPart(version: string): string {
+  return version.replace(/\.g\d+$/, '');
+}
+
+function generationOf(version: string): number {
+  const m = /\.g(\d+)$/.exec(version);
+  return m ? Number(m[1]) : 0;
+}
+
+/** The tracks of every input whose edit came, went or changed: where to put a "!". */
+function changedSlots(
+  was: ReadonlyMap<string, EditView>,
+  now: ReadonlyMap<string, EditView>,
+): string[] {
+  const key = (e: EditView | undefined) =>
+    e ? `${e.count}:${e.zone ?? ''}:${JSON.stringify(e.effect)}` : '';
+  const slots = new Set<string>();
+  for (const input of new Set([...was.keys(), ...now.keys()])) {
+    const a = was.get(input);
+    const b = now.get(input);
+    if (key(a) === key(b)) continue;
+    for (const slot of [...(a?.slots ?? []), ...(b?.slots ?? [])]) slots.add(slot);
+  }
+  return [...slots];
 }
 
 function pendingLine(p: PendingEdit, loopBars: number): { text: string; kind: string } {

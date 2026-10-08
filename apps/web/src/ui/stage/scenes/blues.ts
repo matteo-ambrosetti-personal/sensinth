@@ -5,19 +5,21 @@ import { agingSky, asleep, dim } from './common';
 
 /**
  * Blues: a porch at night. The guitarist rocks in a chair, strumming the
- * chords; someone blows the harmonica lead; the dog's tail thumps the kick,
- * fireflies blink on the hats and the window glows with the organ.
+ * chords; someone blows the harmonica lead, stamping the snare on the
+ * boards; the dog's tail thumps the kick, fireflies blink on the hats, the
+ * double bass hums with the bass line and the window glows with the organ.
  */
 export const blues: Scene = {
   id: 'blues',
   name: 'Blues',
   cast: [
     { key: 'dog', want: ['kick', 'drums'] },
-    { key: 'flies', want: ['hats', 'snare', 'perc'] },
+    { key: 'flies', want: ['hats', 'perc'] },
+    { key: 'stomp', want: ['snare', 'perc'] },
     { key: 'guitar', want: ['chords', 'pad', 'arp'] },
     { key: 'harp', want: ['lead', 'arp', 'tonal'] },
-    { key: 'window', want: ['pad', 'chords', 'bass'] },
     { key: 'bass', want: ['bass'] },
+    { key: 'window', want: ['pad', 'chords'] },
   ],
   draw(s) {
     const { g, t } = s;
@@ -40,6 +42,10 @@ export const blues: Scene = {
         (t + i) % 5 > 4.7 ? 1 : 0,
         '#c0c8e0',
       );
+    // The yard under the night sky, out to the porch.
+    g.rect(0, 64, g.w, 14, mix('#121a12', '#0a0e0a', s.drift));
+    for (let x = 0; x < 96; x += 6)
+      g.rect(x, 64 - Math.floor(noise(x + 70) * 3), 6, 3, mix('#18241a', '#0e140e', s.drift));
     g.circle(28, 18, 6, '#f0e8c0');
     g.circle(30, 17, 6, mix('#182448', '#0c0c18', s.drift));
     // The house: wall, window, porch posts and roof.
@@ -129,6 +135,11 @@ export const blues: Scene = {
       },
     );
     g.rect(163, blower.y + 7, 4, 1, '#d0d0d8');
+    // The boards under the harmonica player give with every stamp of the snare.
+    const stomp = s.actor('stomp');
+    if (stomp.on && stomp.hit > 0.4) g.rect(160, 72, 16, 1, '#a07a50');
+    if (stomp.fresh) s.float({ x: 172, y: 71, color: '#c0a070', kind: 'spark', life: 0.4 });
+    s.place('stomp', blower);
     if (harp.fresh) s.float({ x: 160, y: blower.y + 4, color: '#a0c0ff', kind: 'note' });
     s.place('harp', blower);
     // The double bass leans on the wall, its strings humming with the bass line.

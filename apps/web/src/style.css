@@ -502,8 +502,17 @@ input[type='checkbox'] {
   text-transform: uppercase;
   color: var(--ink);
   text-shadow: 1px 1px 0 #000;
-  display: grid;
+  /* Never taller than the screen: when the lines do not fit, the oldest go off the top. */
+  max-height: calc(100% - 16px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   gap: 2px;
+}
+
+.banner .is-more {
+  color: var(--muted);
 }
 
 .banner .is-pending {
@@ -525,6 +534,7 @@ input[type='checkbox'] {
     right: 4px;
     bottom: 4px;
     padding: 6px;
+    max-height: calc(100% - 8px);
   }
 }
 

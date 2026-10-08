@@ -271,7 +271,7 @@ function anySourceOn(): boolean {
 }
 
 function renderTransport(): void {
-  const playing = player.playing;
+  const playing = player.playing || player.isRestarting;
   const seeded = player.deterministic;
   const canPlay = playing || anySourceOn() || seeded !== undefined;
   playBtn.setAttribute('aria-pressed', String(playing));
@@ -296,6 +296,21 @@ function renderTransport(): void {
   else hint.textContent = 'Playing. Every track below is written by the sensors.';
 }
 
+// A menu picked with the mouse or a finger hands the keys back to the music; one stepped
+// through with the keyboard keeps the focus, so it can go on stepping.
+let pointedAt: Node | null = null;
+document.addEventListener('pointerdown', (e) => (pointedAt = e.target as Node), true);
+document.addEventListener('keydown', () => (pointedAt = null), true);
+document.addEventListener(
+  'change',
+  (e) => {
+    const el = e.target;
+    if (el instanceof HTMLSelectElement && pointedAt && el.contains(pointedAt)) el.blur();
+    pointedAt = null;
+  },
+  true,
+);
+
 // Play becomes available as soon as a source is switched on.
 sources.onChange = () => {
   sourcesView.render();
@@ -305,7 +320,8 @@ sources.onChange = () => {
 playBtn.addEventListener('click', async (event) => {
   // After a click, let Space and Enter reach the music rather than this button.
   if (event.detail > 0) playBtn.blur();
-  if (player.playing) player.stop();
+  // Stop, also while Start over is still starting the audio again.
+  if (player.playing || player.isRestarting) player.stop();
   else {
     if (!anySourceOn() && !player.deterministic) return;
     try {
@@ -428,8 +444,6 @@ function applyDeterministic(remap = true): void {
 for (const el of [detOn, detSeed, detLoop, detRepeat, detSensors, detInstruments, detEvolve]) {
   el.addEventListener('change', () => {
     applyDeterministic();
-    // A menu keeps the focus after a change: hand the keys back to the music.
-    if (el instanceof HTMLSelectElement) el.blur();
   });
 }
 inputMap.onChange = (map) => {

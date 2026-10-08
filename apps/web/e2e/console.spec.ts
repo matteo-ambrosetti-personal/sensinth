@@ -118,3 +118,91 @@ test('with sensors off, moving the pointer never changes the seed’s song', asy
   await expect(page.locator('#g-change')).toHaveText('the seed’s own');
   await expect(page.locator('#zones li').first()).toContainText('Sensors are off');
 });
+
+test('a menu stepped with the keyboard keeps its keys while a song plays', async ({ page }) => {
+  await page.goto('/');
+  await allSourcesOff(page);
+  await turnOn(page, 'keyboard');
+  await page.locator('label:has(#det-on)').click();
+  await page.locator('#play').click();
+  await expect(page.locator('#song-panel')).toBeVisible({ timeout: 8000 });
+  const repeat = page.locator('#det-repeat');
+  const before = await repeat.inputValue();
+  await repeat.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(repeat).not.toHaveValue(before);
+  await expect(repeat).toBeFocused();
+  // The key went to the menu, not to the music.
+  await page.waitForTimeout(300);
+  await expect(page.locator('#pending .change')).toHaveCount(0);
+});
+
+test('only the track an edit changed flashes when it lands', async ({ page }) => {
+  await page.goto('/');
+  await allSourcesOff(page);
+  await turnOn(page, 'keyboard');
+  await page.locator('label:has(#det-on)').click();
+  await page.locator('#det-loop').selectOption('2');
+  await page.locator('#tempo').fill('160');
+  await page.locator('#play').click();
+  await expect(page.locator('#song-panel')).toBeVisible({ timeout: 8000 });
+  await page.locator('h1').first().click();
+  await page.keyboard.press('KeyQ');
+  await expect(page.locator('#changes .change')).toHaveCount(1, { timeout: 5000 });
+  // From now on, note every track row that lights up.
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { flashed: string[] }).flashed = seen;
+    new MutationObserver((records) => {
+      for (const r of records) {
+        const el = r.target as HTMLElement;
+        if (el.classList.contains('is-flash') && el.dataset.slot) seen.push(el.dataset.slot);
+      }
+    }).observe(document.querySelector('#tracks') as Node, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  });
+  await page.keyboard.press('KeyW');
+  await expect(page.locator('#changes .change')).toHaveCount(2, { timeout: 5000 });
+  await page.waitForTimeout(200);
+  const flashed = await page.evaluate(() => (window as unknown as { flashed: string[] }).flashed);
+  expect([...new Set(flashed)]).toEqual(['t2']);
+});
+
+test('the Blues screen paints all of its picture', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.style-chip', { hasText: 'Chiptune' }).click();
+  await page.waitForTimeout(300);
+  await page.locator('.style-chip', { hasText: 'Blues' }).click();
+  // After the wipe, the yard left of the porch is painted, not left black.
+  await page.waitForTimeout(1500);
+  const black = await page.locator('#stage').evaluate((c: HTMLCanvasElement) => {
+    const d = c.getContext('2d')!.getImageData(0, 64, 96, 14).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 0) n++;
+    return n;
+  });
+  expect(black).toBe(0);
+});
+
+test('Stop while Start over is starting the audio stops the music', async ({ page }) => {
+  // A slow device: the audio takes a moment to start.
+  await page.addInitScript(() => {
+    const resume = AudioContext.prototype.resume;
+    AudioContext.prototype.resume = function (this: AudioContext) {
+      return new Promise<void>((done) => setTimeout(done, 400)).then(() => resume.call(this));
+    };
+  });
+  await page.goto('/');
+  await allSourcesOff(page);
+  await turnOn(page, 'sim');
+  await page.locator('#play').click();
+  await expect(page.locator('#play')).toHaveAttribute('aria-label', 'Stop', { timeout: 8000 });
+  await page.locator('#restart').click();
+  await page.locator('#play').click();
+  await page.waitForTimeout(1200);
+  await expect(page.locator('#play')).toHaveAttribute('aria-label', 'Play');
+  await expect(page.locator('#now-key')).toHaveText('Stopped');
+});
