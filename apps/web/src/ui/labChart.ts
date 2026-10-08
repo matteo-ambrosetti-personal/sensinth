@@ -90,7 +90,7 @@ export class LabChart {
     const yOf = (v: number) => PAD.top + (1 - (v - lo) / (hi - lo)) * plotH;
 
     // Grid and axis labels (hairline, recessive).
-    g.font = `16px ${theme().fontMono}`;
+    g.font = `11px ${theme().fontMono}`;
     g.textBaseline = 'middle';
     g.lineWidth = 1;
     g.strokeStyle = c.grid;

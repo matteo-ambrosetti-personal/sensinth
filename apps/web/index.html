@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#06061a" />
+    <meta name="theme-color" content="#0b0805" />
     <meta name="description" content="Generative music from your phone sensors." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
@@ -50,7 +50,7 @@
         </div>
       </header>
 
-      <!-- Play: the instrument. The console (screen, tempo, cartridges), the tracks, where the
+      <!-- Play: the instrument. The console (screen, tempo, styles), the tracks, where the
            music is heading and who steers it, the song settings and the sources. -->
       <section class="panel console play-only" aria-label="Console">
         <div class="screen">
@@ -76,7 +76,7 @@
           />
         </div>
         <div class="cartridges">
-          <h2 id="style-title">Style <span class="h2-note">pick a cartridge</span></h2>
+          <h2 id="style-title">Style <span class="h2-note">pick one</span></h2>
           <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
           <p id="style-desc" class="style-desc"></p>
         </div>
@@ -242,13 +242,13 @@
             <ul id="zones" class="zones" aria-label="Where each sensor is"></ul>
           </section>
 
-          <section class="panel" aria-labelledby="dials-title">
+          <section class="panel dials-panel" aria-labelledby="dials-title">
             <h2 id="dials-title">Musical dials <span class="h2-note">set by sensors</span></h2>
             <ul id="dials" class="dials"></ul>
           </section>
         </div>
         <div class="column">
-          <section class="panel" aria-labelledby="sources-title">
+          <section class="panel sources-panel" aria-labelledby="sources-title">
             <h2 id="sources-title">Sources</h2>
             <ul id="sources" class="sources"></ul>
             <div class="recorder">

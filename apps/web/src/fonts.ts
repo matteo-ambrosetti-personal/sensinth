@@ -1,14 +1,23 @@
-import pixelify400 from '@fontsource/pixelify-sans/files/pixelify-sans-latin-400-normal.woff2?url';
-import pixelify600 from '@fontsource/pixelify-sans/files/pixelify-sans-latin-600-normal.woff2?url';
-import pressStart from '@fontsource/press-start-2p/files/press-start-2p-latin-400-normal.woff2?url';
-import vt323 from '@fontsource/vt323/files/vt323-latin-400-normal.woff2?url';
+import chakra500 from '@fontsource/chakra-petch/files/chakra-petch-latin-500-normal.woff2?url';
+import chakra600 from '@fontsource/chakra-petch/files/chakra-petch-latin-600-normal.woff2?url';
+import plexMono400 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2?url';
+import plexMono500 from '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2?url';
+import plexSans400 from '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2?url';
+import plexSans500 from '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2?url';
+import plexSans600 from '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2?url';
 
-/** Self-hosted Latin pixel fonts, so the installed app looks the same offline. */
+/**
+ * Self-hosted Latin faces, so the installed app looks the same offline: Chakra
+ * Petch for titles and buttons, IBM Plex Sans to read, IBM Plex Mono for numbers.
+ */
 const FACES: [family: string, url: string, descriptors: FontFaceDescriptors][] = [
-  ['Press Start 2P', pressStart, { weight: '400' }],
-  ['Pixelify Sans', pixelify400, { weight: '400' }],
-  ['Pixelify Sans', pixelify600, { weight: '600' }],
-  ['VT323', vt323, { weight: '400' }],
+  ['Chakra Petch', chakra500, { weight: '500' }],
+  ['Chakra Petch', chakra600, { weight: '600' }],
+  ['IBM Plex Sans', plexSans400, { weight: '400' }],
+  ['IBM Plex Sans', plexSans500, { weight: '500' }],
+  ['IBM Plex Sans', plexSans600, { weight: '600' }],
+  ['IBM Plex Mono', plexMono400, { weight: '400' }],
+  ['IBM Plex Mono', plexMono500, { weight: '500' }],
 ];
 
 export function loadFonts(): void {

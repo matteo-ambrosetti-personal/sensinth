@@ -166,7 +166,8 @@ not what was wanted, and 3.10 replaces it.
   which bar, pending changes and zone meters in the Song panel, zones counted from Play,
   _Sensors: off_, number keys past the last track do nothing, an optional reproducible
   **Evolve**, identical loop passes and a clock that catches up after a stall.
-- **A 16-bit console look:** menu windows, pixel fonts, cartridges, A and B buttons.
+- **An amber terminal look:** warm black glass, shades of one amber, readable type, colour only for
+  tracks and areas; each page with its own panels and no gaps between them.
 - **Fixes** from a code review: chords at section starts, stale harmony inputs, the scene riser,
   the style picked while waiting, views that changed after they were handed out, mutations that
   broke four on the floor or moved routes onto the FX lane, a double Play, mutes left on another

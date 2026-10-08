@@ -229,7 +229,7 @@ export class TracksView {
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    ctx.font = `15px ${c.font}`;
+    ctx.font = `10px ${c.font}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     const gap = (cssWidth - COLUMNS * cell) / (COLUMNS - 1);
@@ -306,7 +306,7 @@ function drawTrig(
     ctx.save();
     ctx.fillStyle = c.inset;
     ctx.textBaseline = 'middle';
-    ctx.font = `${cell >= 24 ? 15 : 13}px ${c.font}`;
+    ctx.font = `500 ${cell >= 24 ? 10 : 9}px ${c.font}`;
     ctx.fillText(FX_INFO[trig.fx].short, x + cell / 2 + shift, y + cell / 2 + 0.5, cell - 4);
     ctx.restore();
   }

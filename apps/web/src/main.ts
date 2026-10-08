@@ -104,7 +104,7 @@ setBpm(bpm);
 const stylesEl = $('styles');
 const styleDesc = $('style-desc');
 
-/** Each cartridge's label colour. */
+/** Each style's own colour (a dot on its key, warmed toward the amber). */
 const CART_COLORS: Record<string, string> = {
   free: 'var(--ink)',
   chiptune: 'var(--t4)',
@@ -282,7 +282,8 @@ function renderTransport(): void {
   const playingSeed = player.view()?.snapshot.seed;
   const tilt =
     isMacApp() && !sources.isOn('macMotion') ? ' Turn on Mac motion to play with tilt.' : '';
-  if (!canPlay) hint.textContent = 'Turn on at least one sensor source. No sensor, no music.';
+  if (!canPlay)
+    hint.textContent = 'Turn on at least one sensor source, in Sources below. No sensor, no music.';
   else if (!playing && seeded)
     hint.textContent = `Seed ${seeded.seed}: a song that loops until you change something.${tilt}`;
   else if (!playing)

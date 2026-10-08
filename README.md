@@ -27,8 +27,11 @@ other.
 - **The music drifts.** Every section takes the tracks a step further from where they started (a
   few beats rewritten, the sound walking, now and then another instrument), each style in its own
   way, and **Drift** draws how far each track has come.
-- **The look is a 16-bit console's**: blue menu windows, pixel fonts, cartridges for the styles,
-  an A button for Play and a B button for Start over.
+- **The look is an amber terminal's**, rebuilt today: warm black glass, every control in shades
+  of one amber with faint scan lines, and colour only where it means something (each track, each
+  area). The little pixel band keeps its own screen. Each page has its own job: **Play** (the
+  screen, the tracks, the drift, who drives what, the song and the sources), **Flow** (where each
+  sensor's signal goes) and **Lab** (one sensor at a time, and every live sensor).
 
 A different place, light or colour rewrites the track; even a tiny change in a reading changes the
 next phrase, and nothing repeats. The **Tracks** panel shows each track's waveform, steps and
@@ -243,10 +246,10 @@ pnpm install
 pnpm dev          # http://localhost:5173
 ```
 
-Press the green A button. On a computer the pointer, keyboard and clock drive the music; on a
-phone, motion, tilt and the clock are on from the start. Picking a cartridge (a style) sets its
-suggested tempo (change it after with the slider, − + or Tap); the yellow B button, **Start
-over**, begins a new piece from the top. Turn on more sources (microphone, camera, location,
+Press the amber Play key in the header (it is on every page). On a computer the pointer, keyboard
+and clock drive the music; on a phone, motion, tilt and the clock are on from the start. Picking a
+style sets its suggested tempo (change it after with the slider, − + or Tap); the key next to
+Play, **Start over**, begins a new piece from the top. Turn on more sources (microphone, camera, location,
 simulated sensors) in the Sources panel; sources this device can't use wait under _Not on this
 device_. With every source off, Play waits for one.
 

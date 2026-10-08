@@ -404,17 +404,22 @@ least one source switched on; while no channel is live the music waits and start
 after one sends. Because steps are scheduled 120 ms ahead, `Player` queues each step's engine view
 with its audio time and the UI shows the one that is sounding.
 
-- **The look** is a 16-bit console's: blue menu windows with a white bevel (`style.css`, one
-  theme), pixel fonts (Press Start 2P for titles and numbers, Pixelify Sans for text, VT323 for
-  readouts), cartridges for the styles, an A button for Play and a B button for Start over.
-  Canvases read the colour tokens once through `ui/theme.ts`, including a colour per track and
-  per area.
-- **The console:** the screen (below), the scope of the mix, Play, **Start over**
-  (`Player.restart`: a new engine and audio clock without releasing the wake lock or the
-  background service; a second click while one is starting waits for it), the tempo, the
-  cartridges, and the status bar: section and phrase, the genome's short hash, where the key came
+- **The look** is an amber terminal's (`style.css`, one theme): warm black glass panels with
+  faint scan lines, every control in shades of one amber with a soft glow, Chakra Petch for titles
+  and buttons, IBM Plex Sans to read and IBM Plex Mono for numbers (`fonts.ts`, self-hosted).
+  Colour is kept for meaning: a colour per track and per area, which canvases read once through
+  `ui/theme.ts`.
+- **Pages:** each panel is on one page. Play holds the console, the tracks, the drift, who drives
+  what, the song settings, the dials and the sources; Flow the diagram and every routing; Lab the
+  sensor lab and the live sensors. Play and **Start over** sit in the header, on every page.
+  Windows side by side share a height, so no gap opens between them.
+- **The console:** the screen (below), the scope of the mix, the tempo, the styles, and the
+  status bar (Play and **Start over** are in the header; `Player.restart` makes a new engine and
+  audio clock without releasing the wake lock or the background service, a second click while one
+  is starting waits for it, and Stop meanwhile stops it): section and phrase, the genome's short hash, where the key came
   from, and why the pattern was last rewritten.
-- **The screen** (`ui/stage/`): a 192×108 canvas scaled up by whole pixels. `Stage` casts each
+- **The screen** (`ui/stage/`): a 192×108 canvas scaled up by whole device pixels, in a bezel
+  that hugs it. `Stage` casts each
   part of the style's scene (`scenes/<style>.ts`: a cast of parts by drum voice or role, and a
   draw function) to a track, follows every step's `TrackView.fired` as a hit envelope, the notes
   of the step (`Player.events()`) for pitch, the params for brightness and colour, and draws the

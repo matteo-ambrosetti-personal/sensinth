@@ -194,12 +194,21 @@ export class Stage {
     this.g = new Gfx(ctx, STAGE_W, STAGE_H);
     this.scene = SCENES.free as Scene;
     const fit = () => {
-      const box = canvas.parentElement?.clientWidth ?? STAGE_W;
+      const screen = canvas.parentElement;
+      const css = screen ? getComputedStyle(screen) : undefined;
+      const box = screen
+        ? screen.clientWidth -
+          parseFloat(css?.paddingLeft ?? '0') -
+          parseFloat(css?.paddingRight ?? '0')
+        : STAGE_W;
       // Whole device pixels per stage pixel, so the pixel art stays even on a phone's 2.625
-      // or 3 too: at least two, at most four CSS pixels' worth; with less room, fill the width.
+      // or 3 too: at least two, at most five CSS pixels' worth; with less room, fill the width.
       const dpr = window.devicePixelRatio || 1;
-      const k = Math.min(Math.floor(4 * dpr), Math.floor((box * dpr) / STAGE_W));
-      canvas.style.width = k >= 2 ? `${(STAGE_W * k) / dpr}px` : '100%';
+      const k = Math.min(Math.floor(5 * dpr), Math.floor((box * dpr) / STAGE_W));
+      const width = k >= 2 ? (STAGE_W * k) / dpr : Math.max(1, box);
+      canvas.style.width = `${width}px`;
+      // The bezel and the banner hug the picture, whatever its scale.
+      screen?.style.setProperty('--stage-w', `${width}px`);
     };
     if (canvas.parentElement) new ResizeObserver(fit).observe(canvas.parentElement);
     // Zooming or moving to another screen changes the device pixel ratio.
