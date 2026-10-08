@@ -130,6 +130,32 @@ select {
   flex-wrap: wrap;
 }
 
+/* Play and Start over, in the header on every page. */
+.transport-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.top .play {
+  --play-size: 46px;
+}
+
+.top .play svg {
+  width: 22px;
+  height: 22px;
+}
+
+.top .restart {
+  width: 36px;
+  height: 36px;
+}
+
+.top .restart svg {
+  width: 18px;
+  height: 18px;
+}
+
 .brand {
   margin: 0;
   display: inline-flex;
@@ -275,28 +301,31 @@ h3 {
   font-variant-numeric: tabular-nums;
 }
 
-/* Two columns, and the pair of small windows under the console. */
+/* Two columns, and the pair of windows under the tracks (the drift timeline and
+   the area map, each the full width). Side by side, windows are always the same
+   height: the last window of a column reaches down to the end of the other, so
+   no gap is left between them. */
 .columns,
 .duo {
   display: grid;
   gap: 18px;
+  align-items: stretch;
 }
 
 .column {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 18px;
-  align-content: start;
   min-width: 0;
+}
+
+.column > .panel:last-child {
+  flex: 1 1 auto;
 }
 
 @media (min-width: 880px) {
   .columns {
     grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  }
-
-  .duo {
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-    align-items: start;
   }
 }
 
@@ -781,7 +810,7 @@ input[type='checkbox'] {
 .drift {
   display: block;
   width: 100%;
-  height: 150px;
+  height: 170px;
   background: #000;
   border: 2px solid var(--frame-dark);
   image-rendering: pixelated;
@@ -792,14 +821,17 @@ input[type='checkbox'] {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 10px;
+  /* Sources flow down columns like a newspaper, so the map stays short and has no holes. */
+  columns: 3 240px;
+  column-gap: 12px;
 }
 
 .area-group {
   display: grid;
   gap: 6px;
   padding: 8px;
+  break-inside: avoid;
+  margin-bottom: 12px;
   background: rgba(0, 0, 0, 0.3);
   border: 1px solid var(--line);
 }
@@ -1695,6 +1727,24 @@ input[type='checkbox'] {
   display: grid;
   gap: 14px;
   min-width: 0;
+}
+
+/* The page is all the lab's: the two charts sit side by side on a wide screen. */
+@media (min-width: 880px) {
+  .lab-body {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .lab-body > .field,
+  .lab-body > .lab-about,
+  .lab-body > .lab-facts {
+    grid-column: 1 / -1;
+  }
+
+  .sensors {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+  }
 }
 
 .field {

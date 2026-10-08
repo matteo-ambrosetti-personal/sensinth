@@ -52,7 +52,9 @@ test('the app loads and plays', async ({ page }) => {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.locator('#styles [role="radio"]').first()).toBeVisible();
+  await page.locator('#mode-lab').click();
   await expect(page.locator('#sensors li').first()).toBeVisible();
+  await page.locator('#mode-play').click();
   await page.locator('#play').click();
   await expect(page.locator('#play')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#now-chord')).not.toHaveText('–', { timeout: 5000 });

@@ -13,6 +13,15 @@ function sensorRow(page: Page, label: string) {
   return page.locator('.sensor').filter({ has: page.getByText(label, { exact: true }) });
 }
 
+/** The live sensors are on the Lab page; the sources and the dials on Play. */
+async function toLab(page: Page): Promise<void> {
+  await page.locator('#mode-lab').click();
+}
+
+async function toPlay(page: Page): Promise<void> {
+  await page.locator('#mode-play').click();
+}
+
 test.describe('on a phone', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 400, height: 860 } });
 
@@ -43,15 +52,18 @@ test.describe('on a phone', () => {
   test('motion is on by default and shaking raises the energy', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#src-motion')).toBeChecked();
+    await expect(page.locator('#src-sim')).not.toBeChecked();
+    await toLab(page);
     await expect(sensorRow(page, 'Shake')).toBeVisible();
     await expect(sensorRow(page, 'Tilt')).toBeVisible();
     await expect(sensorRow(page, 'Time of day')).toBeVisible();
-    await expect(page.locator('#src-sim')).not.toBeChecked();
 
+    await toPlay(page);
     await page.waitForTimeout(2500);
     const calm = await dial(page, 'Energy');
     await page.evaluate(() => ((window as unknown as { shake: boolean }).shake = true));
     await expect.poll(() => dial(page, 'Energy'), { timeout: 8000 }).toBeGreaterThan(calm + 25);
+    await toLab(page);
     await expect(sensorRow(page, 'Shake').locator('.route.trigger').first()).toContainText('onset');
   });
 });
@@ -60,7 +72,9 @@ test('on a computer, the pointer and keyboard drive the music', async ({ page })
   await page.goto('/');
   await expect(page.locator('#src-pointer')).toBeChecked();
   await expect(page.locator('#src-sim')).not.toBeChecked();
+  await toLab(page);
   await expect(sensorRow(page, 'Pointer speed')).toBeVisible();
+  await toPlay(page);
   await page.waitForTimeout(2000);
   const calm = await dial(page, 'Energy');
   const deadline = Date.now() + 4000;
@@ -69,6 +83,7 @@ test('on a computer, the pointer and keyboard drive the music', async ({ page })
   }
   expect(await dial(page, 'Energy')).toBeGreaterThan(calm + 20);
   await page.keyboard.type('sensinth');
+  await toLab(page);
   await expect(sensorRow(page, 'Typing').locator('.sensor-value')).not.toHaveText('0.00 keys/s');
 });
 
@@ -94,17 +109,20 @@ test.describe('with camera, microphone and location allowed', () => {
     await expect(page.locator('#src-camera')).toBeChecked();
     await expect(page.locator('#src-mic')).toBeChecked();
     await expect(page.locator('.cam-preview')).toBeVisible();
+    await toLab(page);
     for (const label of ['Camera brightness', 'Camera color', 'Camera movement', 'Sound']) {
       await expect(sensorRow(page, label).locator('.sensor-value')).not.toHaveText('–', {
         timeout: 5000,
       });
     }
+    await toPlay(page);
     await expect(page.locator('.source.is-error')).toHaveCount(0);
   });
 
   test('every piece started at the same place is in the same key', async ({ page }) => {
     await page.goto('/');
     await page.locator('label[for="src-location"]').first().click();
+    await toLab(page);
     await expect(sensorRow(page, 'Speed')).toBeVisible({ timeout: 8000 });
     const keys: string[] = [];
     for (let i = 0; i < 3; i++) {
@@ -120,7 +138,9 @@ test.describe('with camera, microphone and location allowed', () => {
 test('a recorded session downloads and replays', async ({ page }) => {
   await page.goto('/');
   await page.locator('label[for="src-sim"]').first().click();
+  await toLab(page);
   await expect(sensorRow(page, 'Shake (sim)')).toBeVisible();
+  await toPlay(page);
   await page.locator('#record').click();
   await page.waitForTimeout(1500);
   const download = page.waitForEvent('download');
@@ -134,6 +154,7 @@ test('a recorded session downloads and replays', async ({ page }) => {
 
   await page.locator('#load-recording').setInputFiles(file);
   await expect(page.locator('#src-replay')).toBeChecked();
+  await toLab(page);
   await expect(sensorRow(page, 'Shake (sim) (replay)')).toBeVisible();
   await expect(sensorRow(page, 'Shake (sim) (replay)').locator('.sensor-value')).not.toHaveText(
     '–',

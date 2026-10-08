@@ -1,5 +1,5 @@
 import { FX_IDS, FX_INFO } from '../fx/effects';
-import type { Domain } from '../mapping/partition';
+import { DOMAINS, type Domain } from '../mapping/partition';
 import { clamp, mod } from '../math';
 import { hashInts, hashString, Rng } from '../random';
 import { generateTrack, newTrigAt, writePattern } from '../seq/generate';
@@ -305,10 +305,15 @@ export function sensorEffect(
           effect: { id: 'rewrite', target: 1 + (hashString(desc.id) % MAX_TRACKS), wrap: true },
           centered: lo < 0 && hi > 0,
         });
-  if (!owned || owned.length === 0 || owned.includes(EFFECT_DOMAIN[own.effect.id])) return own;
-  const pool = owned
-    .flatMap((d) => DOMAIN_SENSOR_EFFECTS[d])
-    .filter((e) => !exclude?.has(e.effect.id));
+  const allowed = (e: SensorEffect) => !exclude?.has(e.effect.id);
+  const mine = !owned || owned.length === 0 || owned.includes(EFFECT_DOMAIN[own.effect.id]);
+  if (mine && allowed(own)) return own;
+  // Another effect from the sensor's own areas; if none is allowed there (a lid adds tracks, and
+  // the instruments are fixed), from any area, so the sensor never ends up doing nothing.
+  const from = (domains: readonly Domain[]) =>
+    domains.flatMap((d) => DOMAIN_SENSOR_EFFECTS[d]).filter(allowed);
+  const near = from(owned && owned.length > 0 ? owned : DOMAINS);
+  const pool = near.length > 0 ? near : from(DOMAINS);
   return pool.length > 0 ? (pool[hashString(desc.id) % pool.length] as SensorEffect) : own;
 }
 

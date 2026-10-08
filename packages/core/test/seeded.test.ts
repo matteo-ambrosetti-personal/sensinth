@@ -409,6 +409,25 @@ describe('Deterministic songs', () => {
       const e = mapper.press({ id: KEYS.id, t: 0, kind: 'key', value: v, velocity: 1 }, KEYS.kind);
       expect(e && INSTRUMENT_EFFECTS.has(e.effect.id)).toBeFalsy();
     }
+    // The lid's own effect adds a track: with the instruments fixed it still does something.
+    const LID: SensorDescriptor = {
+      id: 'mac.lid',
+      kind: 'lid.angle',
+      label: 'Lid angle',
+      range: [0, 180],
+      adaptive: true,
+      minSpan: 20,
+      rateHz: 10,
+    };
+    const lidMap = mapper.sensor(LID, 'medium');
+    expect(lidMap && !INSTRUMENT_EFFECTS.has(lidMap.map.effect.id)).toBe(true);
+    const lidded = take(
+      lofi,
+      4,
+      { ...o, instruments: false },
+      { descriptors: [LID], sampleAt: (t) => [{ id: LID.id, t, v: t > 2 ? 160 : 100 }] },
+    );
+    expect(lidded.versions.slice(1).some((v) => v !== 'base')).toBe(true);
     // A sensor given areas whose effects change instruments takes another of their effects.
     for (let i = 0; i < 40; i++) {
       const d: SensorDescriptor = {

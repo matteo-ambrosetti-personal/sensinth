@@ -79,6 +79,8 @@ test('the FX lane shows its effects and fires them', async ({ page }) => {
 
 test('the modulation matrix routes every sensor at least twice', async ({ page }) => {
   await startWithSimulatedSensors(page);
+  // Every routing is on the Flow page, with the diagram.
+  await page.locator('#mode-flow').click();
   const sensors = page.locator('#matrix .mod-group').first();
   await expect(sensors).toContainText('Sensors', { timeout: 8000 });
   const count = Number((await sensors.textContent())?.split('·')[1]);
@@ -98,6 +100,7 @@ test('the modulation matrix routes every sensor at least twice', async ({ page }
       { timeout: 5000 },
     )
     .toBeGreaterThan(5);
+  await page.locator('#mode-play').click();
   await expect(page.locator('#g-hash')).toHaveText(/^#[0-9a-f]{6}$/);
   await expect(page.locator('#g-key')).toContainText(/[A-G]/);
 });

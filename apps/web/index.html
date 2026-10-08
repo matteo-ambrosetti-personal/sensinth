@@ -23,16 +23,7 @@
           <span id="now-chord" class="readout-chord">–</span>
           <span id="now-pos" class="readout-pos">–</span>
         </div>
-      </header>
-
-      <!-- The console: the screen, the controls under it, the cartridges. -->
-      <section class="panel transport" aria-label="Transport">
-        <div class="screen play-only">
-          <canvas id="stage" class="stage" role="img" aria-label="The band, stopped"></canvas>
-          <div id="banner" class="banner" aria-live="polite" hidden></div>
-        </div>
-        <canvas id="scope" class="scope" aria-hidden="true"></canvas>
-        <div class="deck">
+        <div class="transport-btns" role="group" aria-label="Transport">
           <button id="play" class="play" type="button" aria-pressed="false">
             <svg class="icon-play" viewBox="0 0 12 12" aria-hidden="true">
               <path d="M3 2h1v1h1v1h1v1h1v2H6v1H5v1H4v1H3z" />
@@ -56,25 +47,35 @@
               />
             </svg>
           </button>
-          <div class="tempo play-only" role="group" aria-labelledby="tempo-title">
-            <h2 id="tempo-title" class="visually-hidden">Tempo</h2>
-            <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
-            <output id="tempo-value" for="tempo" class="bpm">140</output>
-            <span class="bpm-unit">BPM</span>
-            <button id="tempo-up" class="step-btn" type="button" aria-label="Faster">+</button>
-            <button id="tap" class="tap" type="button">Tap</button>
-            <input
-              id="tempo"
-              type="range"
-              min="60"
-              max="200"
-              step="1"
-              value="140"
-              aria-label="Tempo in BPM"
-            />
-          </div>
         </div>
-        <div class="cartridges play-only">
+      </header>
+
+      <!-- Play: the instrument. The console (screen, tempo, cartridges), the tracks, where the
+           music is heading and who steers it, the song settings and the sources. -->
+      <section class="panel console play-only" aria-label="Console">
+        <div class="screen">
+          <canvas id="stage" class="stage" role="img" aria-label="The band, stopped"></canvas>
+          <div id="banner" class="banner" aria-live="polite" hidden></div>
+        </div>
+        <canvas id="scope" class="scope" aria-hidden="true"></canvas>
+        <div class="tempo" role="group" aria-labelledby="tempo-title">
+          <h2 id="tempo-title" class="visually-hidden">Tempo</h2>
+          <button id="tempo-down" class="step-btn" type="button" aria-label="Slower">−</button>
+          <output id="tempo-value" for="tempo" class="bpm">140</output>
+          <span class="bpm-unit">BPM</span>
+          <button id="tempo-up" class="step-btn" type="button" aria-label="Faster">+</button>
+          <button id="tap" class="tap" type="button">Tap</button>
+          <input
+            id="tempo"
+            type="range"
+            min="60"
+            max="200"
+            step="1"
+            value="140"
+            aria-label="Tempo in BPM"
+          />
+        </div>
+        <div class="cartridges">
           <h2 id="style-title">Style <span class="h2-note">pick a cartridge</span></h2>
           <div id="styles" class="styles" role="radiogroup" aria-labelledby="style-title"></div>
           <p id="style-desc" class="style-desc"></p>
@@ -100,60 +101,23 @@
         </dl>
       </section>
 
-      <section class="panel flow-only flow-panel" aria-labelledby="flow-title" hidden>
-        <div class="flow-head">
-          <h2 id="flow-title">
-            Flow <span class="h2-note">how each sensor reaches the sound</span>
-          </h2>
-          <div class="flow-tools">
-            <label class="flow-pick">
-              <span>Sensor</span>
-              <select id="flow-pick"></select>
-            </label>
-            <label class="flow-check"
-              ><input id="flow-strong" type="checkbox" checked /> Strong routes only</label
-            >
-            <button id="flow-pause" class="pill-btn" type="button" aria-pressed="false">
-              Pause
-            </button>
-          </div>
-        </div>
-        <ul class="flow-legend" aria-label="How to read the links">
-          <li><i class="lg fl-sensor"></i>Sensor modulation</li>
-          <li><i class="lg fl-internal"></i>LFOs, chaos, track hits</li>
-          <li><i class="lg fl-event"></i>Sensor events (effects, accents)</li>
-          <li><i class="lg fl-audio"></i>Audio</li>
-          <li><i class="lg fl-genome"></i>Shapes the next section</li>
-          <li><i class="lg is-down"></i>Pulls down; solid pushes up</li>
-          <li class="flow-legend-note">
-            Wider: stronger routing. Brighter, with moving dots: active now.
+      <section class="panel play-only" aria-labelledby="tracks-title">
+        <h2 id="tracks-title">
+          Tracks <span id="tracks-note" class="h2-note">written by the sensors</span>
+        </h2>
+        <ul class="grid-legend" aria-label="How to read the step grids">
+          <li><i class="gl-trig" aria-hidden="true"></i>Step (brighter = louder)</li>
+          <li><i class="gl-cond" aria-hidden="true"></i>Plays only sometimes (1:2, fill, 60%)</li>
+          <li><i class="gl-lock" aria-hidden="true"></i>Own sound on this step</li>
+          <li><i class="gl-roll" aria-hidden="true"></i>Roll</li>
+          <li><i class="gl-head" aria-hidden="true"></i>Now playing</li>
+          <li class="gl-params">
+            CUT filter · DEC decay · TMB timbre · TUN pitch · LVL level · PAN pan; the tick is the
+            track's own value, the bar where the sensors move it
           </li>
         </ul>
-        <p id="flow-empty" class="empty">Turn on a sensor source to see where its signal goes.</p>
-        <div id="flow" class="flow">
-          <svg id="flow-links" class="flow-links" aria-hidden="true"></svg>
-          <div class="flow-col">
-            <h3>Sensors <span>raw → processed</span></h3>
-            <ol id="flow-sensors" class="flow-list flow-sensors"></ol>
-          </div>
-          <div class="flow-col">
-            <h3>Modulators</h3>
-            <ol id="flow-mods" class="flow-list flow-mods"></ol>
-          </div>
-          <div class="flow-col">
-            <h3>Tracks</h3>
-            <ol id="flow-tracks" class="flow-list flow-tracks"></ol>
-          </div>
-          <div class="flow-col">
-            <h3>Mix</h3>
-            <ol id="flow-buses" class="flow-list flow-buses"></ol>
-          </div>
-          <div id="flow-tip" class="flow-tip" role="tooltip" hidden></div>
-        </div>
-        <details class="flow-table">
-          <summary>Every link, as a list</summary>
-          <ul id="flow-table"></ul>
-        </details>
+        <ol id="tracks" class="tracks"></ol>
+        <p id="tracks-empty" class="empty">Press play to see each track.</p>
       </section>
 
       <!-- Where the music is going, and who is steering it. -->
@@ -183,113 +147,8 @@
         </section>
       </div>
 
-      <section class="panel play-only" aria-labelledby="tracks-title">
-        <h2 id="tracks-title">
-          Tracks <span id="tracks-note" class="h2-note">written by the sensors</span>
-        </h2>
-        <ul class="grid-legend" aria-label="How to read the step grids">
-          <li><i class="gl-trig" aria-hidden="true"></i>Step (brighter = louder)</li>
-          <li><i class="gl-cond" aria-hidden="true"></i>Plays only sometimes (1:2, fill, 60%)</li>
-          <li><i class="gl-lock" aria-hidden="true"></i>Own sound on this step</li>
-          <li><i class="gl-roll" aria-hidden="true"></i>Roll</li>
-          <li><i class="gl-head" aria-hidden="true"></i>Now playing</li>
-          <li class="gl-params">
-            CUT filter · DEC decay · TMB timbre · TUN pitch · LVL level · PAN pan; the tick is the
-            track's own value, the bar where the sensors move it
-          </li>
-        </ul>
-        <ol id="tracks" class="tracks"></ol>
-        <p id="tracks-empty" class="empty">Press play to see each track.</p>
-      </section>
-
-      <div class="columns">
+      <div class="columns play-only">
         <div class="column">
-          <section class="panel lab-only" aria-labelledby="lab-title" hidden>
-            <div class="panel-head">
-              <h2 id="lab-title">Sensor lab</h2>
-              <label class="switch">
-                <input id="lab-solo" type="checkbox" />
-                <span class="switch-track" aria-hidden="true"></span>
-                Solo in the music
-              </label>
-            </div>
-            <p id="lab-empty" class="empty" hidden>Turn on a source to see its sensors here.</p>
-            <div id="lab-body" class="lab-body">
-              <label class="field" for="lab-channel">
-                <span class="field-label">Sensor</span>
-                <select id="lab-channel"></select>
-              </label>
-              <p id="lab-about" class="lab-about"></p>
-
-              <div class="chart-block">
-                <div class="chart-head">
-                  <h3 id="lab-raw-title">Raw reading</h3>
-                  <span id="lab-raw-now" class="chart-now">–</span>
-                </div>
-                <canvas
-                  id="lab-raw"
-                  class="lab-chart"
-                  role="img"
-                  aria-label="Raw sensor reading over the last 15 seconds"
-                ></canvas>
-              </div>
-
-              <div class="chart-block">
-                <div class="chart-head">
-                  <h3>What the engine uses <span class="h3-note">0 to 1</span></h3>
-                  <span id="lab-time" class="chart-now">now</span>
-                </div>
-                <ul class="legend">
-                  <li>
-                    <span class="swatch swatch-level" aria-hidden="true"></span>Level
-                    <b id="lab-level">–</b>
-                  </li>
-                  <li>
-                    <span class="swatch swatch-norm" aria-hidden="true"></span>Normalized
-                    <b id="lab-norm">–</b>
-                  </li>
-                  <li>
-                    <span class="swatch swatch-activity" aria-hidden="true"></span>Activity
-                    <b id="lab-activity">–</b>
-                  </li>
-                  <li>
-                    <span class="swatch swatch-onset" aria-hidden="true"></span>Onsets
-                    <b id="lab-onsets">–</b>
-                  </li>
-                </ul>
-                <canvas
-                  id="lab-proc"
-                  class="lab-chart"
-                  role="img"
-                  aria-label="Normalized value, smoothed level, activity and onsets over the last 15 seconds"
-                ></canvas>
-              </div>
-
-              <dl class="lab-facts">
-                <div>
-                  <dt>Trend</dt>
-                  <dd id="lab-trend">–</dd>
-                </div>
-                <div>
-                  <dt>Mapped range</dt>
-                  <dd id="lab-range">–</dd>
-                </div>
-                <div>
-                  <dt>Readings</dt>
-                  <dd id="lab-rate">–</dd>
-                </div>
-                <div>
-                  <dt>Timescale</dt>
-                  <dd id="lab-scale">–</dd>
-                </div>
-                <div class="wide">
-                  <dt>Drives</dt>
-                  <dd id="lab-drives">–</dd>
-                </div>
-              </dl>
-            </div>
-          </section>
-
           <section class="panel play-only song-mode" aria-labelledby="det-title">
             <div class="panel-head">
               <h2 id="det-title">Song mode</h2>
@@ -388,7 +247,6 @@
             <ul id="dials" class="dials"></ul>
           </section>
         </div>
-
         <div class="column">
           <section class="panel" aria-labelledby="sources-title">
             <h2 id="sources-title">Sources</h2>
@@ -410,21 +268,167 @@
               Record a session to replay it later, on this or any other device.
             </p>
           </section>
-
-          <section class="panel play-only" aria-labelledby="sensors-title">
-            <h2 id="sensors-title">Live sensors</h2>
-            <ul id="sensors" class="sensors"></ul>
-            <p id="sensors-empty" class="empty" hidden>No sensors on. Turn on a source above.</p>
-          </section>
         </div>
       </div>
 
-      <section class="panel play-only" aria-labelledby="matrix-title">
+      <!-- Flow: the wiring. -->
+      <section class="panel flow-only flow-panel" aria-labelledby="flow-title" hidden>
+        <div class="flow-head">
+          <h2 id="flow-title">
+            Flow <span class="h2-note">how each sensor reaches the sound</span>
+          </h2>
+          <div class="flow-tools">
+            <label class="flow-pick">
+              <span>Sensor</span>
+              <select id="flow-pick"></select>
+            </label>
+            <label class="flow-check"
+              ><input id="flow-strong" type="checkbox" checked /> Strong routes only</label
+            >
+            <button id="flow-pause" class="pill-btn" type="button" aria-pressed="false">
+              Pause
+            </button>
+          </div>
+        </div>
+        <ul class="flow-legend" aria-label="How to read the links">
+          <li><i class="lg fl-sensor"></i>Sensor modulation</li>
+          <li><i class="lg fl-internal"></i>LFOs, chaos, track hits</li>
+          <li><i class="lg fl-event"></i>Sensor events (effects, accents)</li>
+          <li><i class="lg fl-audio"></i>Audio</li>
+          <li><i class="lg fl-genome"></i>Shapes the next section</li>
+          <li><i class="lg is-down"></i>Pulls down; solid pushes up</li>
+          <li class="flow-legend-note">
+            Wider: stronger routing. Brighter, with moving dots: active now.
+          </li>
+        </ul>
+        <p id="flow-empty" class="empty">Turn on a sensor source to see where its signal goes.</p>
+        <div id="flow" class="flow">
+          <svg id="flow-links" class="flow-links" aria-hidden="true"></svg>
+          <div class="flow-col">
+            <h3>Sensors <span>raw → processed</span></h3>
+            <ol id="flow-sensors" class="flow-list flow-sensors"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Modulators</h3>
+            <ol id="flow-mods" class="flow-list flow-mods"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Tracks</h3>
+            <ol id="flow-tracks" class="flow-list flow-tracks"></ol>
+          </div>
+          <div class="flow-col">
+            <h3>Mix</h3>
+            <ol id="flow-buses" class="flow-list flow-buses"></ol>
+          </div>
+          <div id="flow-tip" class="flow-tip" role="tooltip" hidden></div>
+        </div>
+        <details class="flow-table">
+          <summary>Every link, as a list</summary>
+          <ul id="flow-table"></ul>
+        </details>
+      </section>
+
+      <section class="panel flow-only" aria-labelledby="matrix-title" hidden>
         <h2 id="matrix-title">
           Every routing <span class="h2-note">what moves what, right now</span>
         </h2>
         <ul id="matrix" class="matrix"></ul>
         <p id="matrix-empty" class="empty">Press play to see the routings.</p>
+      </section>
+
+      <!-- Lab: the sensors, one at a time and all together. -->
+      <section class="panel lab-only" aria-labelledby="lab-title" hidden>
+        <div class="panel-head">
+          <h2 id="lab-title">Sensor lab</h2>
+          <label class="switch">
+            <input id="lab-solo" type="checkbox" />
+            <span class="switch-track" aria-hidden="true"></span>
+            Solo in the music
+          </label>
+        </div>
+        <p id="lab-empty" class="empty" hidden>Turn on a source to see its sensors here.</p>
+        <div id="lab-body" class="lab-body">
+          <label class="field" for="lab-channel">
+            <span class="field-label">Sensor</span>
+            <select id="lab-channel"></select>
+          </label>
+          <p id="lab-about" class="lab-about"></p>
+
+          <div class="chart-block">
+            <div class="chart-head">
+              <h3 id="lab-raw-title">Raw reading</h3>
+              <span id="lab-raw-now" class="chart-now">–</span>
+            </div>
+            <canvas
+              id="lab-raw"
+              class="lab-chart"
+              role="img"
+              aria-label="Raw sensor reading over the last 15 seconds"
+            ></canvas>
+          </div>
+
+          <div class="chart-block">
+            <div class="chart-head">
+              <h3>What the engine uses <span class="h3-note">0 to 1</span></h3>
+              <span id="lab-time" class="chart-now">now</span>
+            </div>
+            <ul class="legend">
+              <li>
+                <span class="swatch swatch-level" aria-hidden="true"></span>Level
+                <b id="lab-level">–</b>
+              </li>
+              <li>
+                <span class="swatch swatch-norm" aria-hidden="true"></span>Normalized
+                <b id="lab-norm">–</b>
+              </li>
+              <li>
+                <span class="swatch swatch-activity" aria-hidden="true"></span>Activity
+                <b id="lab-activity">–</b>
+              </li>
+              <li>
+                <span class="swatch swatch-onset" aria-hidden="true"></span>Onsets
+                <b id="lab-onsets">–</b>
+              </li>
+            </ul>
+            <canvas
+              id="lab-proc"
+              class="lab-chart"
+              role="img"
+              aria-label="Normalized value, smoothed level, activity and onsets over the last 15 seconds"
+            ></canvas>
+          </div>
+
+          <dl class="lab-facts">
+            <div>
+              <dt>Trend</dt>
+              <dd id="lab-trend">–</dd>
+            </div>
+            <div>
+              <dt>Mapped range</dt>
+              <dd id="lab-range">–</dd>
+            </div>
+            <div>
+              <dt>Readings</dt>
+              <dd id="lab-rate">–</dd>
+            </div>
+            <div>
+              <dt>Timescale</dt>
+              <dd id="lab-scale">–</dd>
+            </div>
+            <div class="wide">
+              <dt>Drives</dt>
+              <dd id="lab-drives">–</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel lab-only" aria-labelledby="sensors-title" hidden>
+        <h2 id="sensors-title">Live sensors</h2>
+        <ul id="sensors" class="sensors"></ul>
+        <p id="sensors-empty" class="empty" hidden>
+          No sensors on. Turn on a source in Sources, on the Play page.
+        </p>
       </section>
 
       <footer class="foot">Sensor readings stay on this device.</footer>

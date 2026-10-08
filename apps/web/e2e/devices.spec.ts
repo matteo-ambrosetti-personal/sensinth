@@ -15,6 +15,8 @@ async function fakeHardware(page: Page): Promise<void> {
     const lid = {
       opened: false,
       productName: 'Lid Angle Sensor',
+      vendorId: 0x05ac,
+      productId: 0x8104,
       async open() {
         this.opened = true;
       },
@@ -76,6 +78,15 @@ function sensorRow(page: Page, label: string) {
   return page.locator('.sensor').filter({ has: page.getByText(label, { exact: true }) });
 }
 
+/** The live sensors are on the Lab page; the sources and the area map on Play. */
+async function toLab(page: Page): Promise<void> {
+  await page.locator('#mode-lab').click();
+}
+
+async function toPlay(page: Page): Promise<void> {
+  await page.locator('#mode-play').click();
+}
+
 async function turnOn(page: Page, id: string): Promise<void> {
   await page.locator(`label[for="src-${id}"]`).first().click();
   await expect(page.locator(`#src-${id}`)).toBeChecked();
@@ -100,6 +111,7 @@ test.beforeEach(async ({ page }) => {
 test('the MacBook lid angle arrives over WebHID', async ({ page }) => {
   // On its own the lid drives everything, the space dial its rules give it included.
   await only(page, 'lid');
+  await toLab(page);
   const row = sensorRow(page, 'Lid angle');
   await expect(row).toBeVisible();
   await expect(row.locator('.sensor-value')).toContainText('°');
@@ -108,8 +120,25 @@ test('the MacBook lid angle arrives over WebHID', async ({ page }) => {
   await expect.poll(() => row.locator('.sensor-value').textContent()).not.toBe(first);
 });
 
+test('a lid sensor that does not answer says so instead of staying silent', async ({ page }) => {
+  await page.evaluate(async () => {
+    const hid = (navigator as unknown as { hid: { getDevices(): Promise<object[]> } }).hid;
+    const [lid] = await hid.getDevices();
+    Object.assign(lid as object, {
+      receiveFeatureReport: async () => {
+        throw new DOMException('Failed to receive the feature report.', 'NotAllowedError');
+      },
+    });
+  });
+  await page.locator('label[for="src-lid"]').first().click();
+  await expect(page.locator('#sources .source-msg', { hasText: 'did not answer' })).toBeVisible();
+  await expect(page.locator('#src-lid')).not.toBeChecked();
+  await expect(sensorRow(page, 'Lid angle')).toHaveCount(0);
+});
+
 test('a game controller becomes sticks, a trigger and buttons', async ({ page }) => {
   await turnOn(page, 'gamepad');
+  await toLab(page);
   await expect(sensorRow(page, 'Test Pad: Left stick x')).toBeVisible();
   await expect(sensorRow(page, 'Test Pad: Left stick x').locator('.sensor-value')).toHaveText(
     /0\.5/,
@@ -121,6 +150,7 @@ test('a game controller becomes sticks, a trigger and buttons', async ({ page })
   for (const name of ['Test Pad: Left stick x', 'Test Pad: right trigger', 'Test Pad: buttons']) {
     await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
   }
+  await toPlay(page);
   await expect(page.locator('#areas .area-group[data-group="gamepad"]')).toBeVisible();
 });
 
@@ -130,6 +160,7 @@ test('turning a MIDI knob adds a channel for it', async ({ page }) => {
   await page.evaluate(() =>
     (window as unknown as { turnKnob: (c: number, v: number) => void }).turnKnob(74, 100),
   );
+  await toLab(page);
   const knob = sensorRow(page, 'Knob Box: CC 74');
   await expect(knob).toBeVisible();
   await expect(knob.locator('.sensor-value')).toHaveText(/100/);
@@ -137,6 +168,7 @@ test('turning a MIDI knob adds a channel for it', async ({ page }) => {
 
 test('CPU pressure reads as load', async ({ page }) => {
   await only(page, 'cpu');
+  await toLab(page);
   const row = sensorRow(page, 'CPU pressure');
   await expect(row).toBeVisible();
   await expect(row.locator('.sensor-value')).toHaveText(/0\.75/);
@@ -145,6 +177,7 @@ test('CPU pressure reads as load', async ({ page }) => {
 
 test('a Force Touch press reads as press force', async ({ page }) => {
   await expect(page.locator('#src-pointer')).toBeChecked();
+  await toLab(page);
   const row = sensorRow(page, 'Press force');
   await expect(row).toBeVisible();
   await page.evaluate(() => {

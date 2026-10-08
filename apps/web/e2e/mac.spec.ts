@@ -130,16 +130,27 @@ function sensorRow(page: Page, label: string) {
   return page.locator('.sensor').filter({ has: page.getByText(label, { exact: true }) });
 }
 
+/** The live sensors are on the Lab page; the sources and the area map on Play. */
+async function toLab(page: Page): Promise<void> {
+  await page.locator('#mode-lab').click();
+}
+
+async function toPlay(page: Page): Promise<void> {
+  await page.locator('#mode-play').click();
+}
+
 test('the Mac app starts with its own sensors on', async ({ page }) => {
   await fakeMacApp(page, 'works');
   await page.goto('/');
   await expect(page.locator('#src-mac')).toBeChecked();
+  await toLab(page);
   await expect(sensorRow(page, 'Lid angle')).toBeVisible();
   await expect(sensorRow(page, 'Lid angle').locator('.sensor-value')).toContainText('°');
   // With the pointer, keyboard and clock on too, the Mac's sensors get their own part of the music.
   for (const name of ['Chip temperature', 'Idle time', 'Lid angle']) {
     await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
   }
+  await toPlay(page);
   await expect(page.locator('#areas .area-group[data-group="mac"]')).toBeVisible();
   // The app reads the lid itself, so the WebHID source is not offered.
   await expect(page.locator('#src-lid')).toHaveCount(0);
@@ -150,6 +161,7 @@ test('Mac motion adds shake and tilt once the password is given', async ({ page 
   await page.goto('/');
   await page.locator('label[for="src-macMotion"]').first().click();
   await expect(page.locator('#src-macMotion')).toBeChecked();
+  await toLab(page);
   await expect(sensorRow(page, 'Shake (Mac)')).toBeVisible();
   await expect(sensorRow(page, 'Tilt forward–back (Mac)').locator('.sensor-value')).toContainText(
     '12',

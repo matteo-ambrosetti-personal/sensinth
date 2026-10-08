@@ -85,17 +85,29 @@ function sensorRow(page: Page, label: string) {
   return page.locator('.sensor').filter({ has: page.getByText(label, { exact: true }) });
 }
 
+/** The live sensors are on the Lab page; the sources and the area map on Play. */
+async function toLab(page: Page): Promise<void> {
+  await page.locator('#mode-lab').click();
+}
+
+async function toPlay(page: Page): Promise<void> {
+  await page.locator('#mode-play').click();
+}
+
 test('the Android app turns every listed phone sensor into a channel', async ({ page }) => {
   await fakePhone(page);
   await page.goto('/');
   // In the app the phone sensors are on from the first start.
   await expect(page.locator('#src-native')).toBeChecked();
+  await toLab(page);
   await expect(sensorRow(page, 'Something near')).toBeVisible();
   // Every phone sensor gets its own share of what the phone's source controls.
   for (const name of ['Something near', 'Hall sensor', 'Heat (thermal headroom)']) {
     await expect(sensorRow(page, name).locator('.sensor-areas .area-chip').first()).toBeVisible();
   }
+  await toPlay(page);
   await expect(page.locator('#areas .area-group[data-group="native"]')).toBeVisible();
+  await toLab(page);
   await expect(sensorRow(page, 'Battery temperature').locator('.sensor-value')).toContainText(
     '31.5',
   );

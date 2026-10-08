@@ -5,6 +5,8 @@ import { nowSeconds, SourceError, type WebSensorSource } from './source';
 interface HidDevice {
   opened: boolean;
   productName: string;
+  vendorId: number;
+  productId: number;
   open(): Promise<void>;
   close(): Promise<void>;
   receiveFeatureReport(reportId: number): Promise<DataView>;
@@ -39,6 +41,14 @@ const LID: SensorDescriptor = {
   source: 'mac',
 };
 
+/** True for the lid sensor among the devices the site may use. */
+function isLid(d: HidDevice): boolean {
+  return d.vendorId === LID_FILTER.vendorId && d.productId === LID_FILTER.productId;
+}
+
+/** Reads failed in a row before the source says the sensor stopped answering. */
+const MAX_MISSES = 20;
+
 /** Reads the angle from a feature report, with or without the report id in front. */
 export function lidAngle(report: DataView): number | undefined {
   if (report.byteLength >= 3 && report.getUint8(0) === 1) return report.getUint16(1, true);
@@ -58,6 +68,7 @@ export class LidAngleSource implements WebSensorSource {
   private device: HidDevice | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private reading = false;
+  private misses = 0;
 
   private get hid(): Hid | undefined {
     return (navigator as Navigator & { hid?: Hid }).hid;
@@ -74,8 +85,8 @@ export class LidAngleSource implements WebSensorSource {
   async start(hub: SensorHub): Promise<void> {
     const hid = this.hid;
     if (!hid) throw new SourceError('This browser has no WebHID.');
-    // A device allowed before reconnects without asking.
-    let device = (await hid.getDevices())[0];
+    // A lid sensor allowed before reconnects without asking (other allowed devices are not it).
+    let device = (await hid.getDevices()).find(isLid);
     if (!device) {
       try {
         [device] = await hid.requestDevice({ filters: [LID_FILTER] });
@@ -84,10 +95,34 @@ export class LidAngleSource implements WebSensorSource {
       }
     }
     if (!device) throw new SourceError('No lid sensor chosen (only recent MacBooks have one).');
-    if (!device.opened) await device.open();
+    try {
+      if (!device.opened) await device.open();
+    } catch {
+      throw new SourceError('The lid sensor is busy. Quit other apps reading it, then try again.');
+    }
+    // Read it once now, so a sensor that does not answer says so instead of staying silent.
+    const first = await this.read(device);
+    if (first === undefined) {
+      void device.close().catch(() => {});
+      throw new SourceError(
+        'The lid sensor did not answer. This MacBook may not have one (M1 models do not); the Mac app can also read it.',
+      );
+    }
     this.device = device;
+    this.misses = 0;
     hub.announce(LID);
+    hub.push({ id: LID.id, t: nowSeconds(), v: first });
     this.timer = setInterval(() => void this.poll(hub), 100);
+  }
+
+  /** One angle, or undefined when the sensor does not give one. */
+  private async read(device: HidDevice): Promise<number | undefined> {
+    try {
+      const angle = lidAngle(await device.receiveFeatureReport(1));
+      return angle !== undefined && angle <= 360 ? angle : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   stop(hub: SensorHub): void {
@@ -99,13 +134,20 @@ export class LidAngleSource implements WebSensorSource {
   }
 
   private async poll(hub: SensorHub): Promise<void> {
-    if (!this.device || this.reading) return;
+    const device = this.device;
+    if (!device || this.reading) return;
     this.reading = true;
     try {
-      const angle = lidAngle(await this.device.receiveFeatureReport(1));
-      if (angle !== undefined && angle <= 360) hub.push({ id: LID.id, t: nowSeconds(), v: angle });
-    } catch {
-      // A missed report; the next poll tries again.
+      // After sleep the browser may close the device: open it again.
+      if (!device.opened) await device.open().catch(() => {});
+      const angle = await this.read(device);
+      if (angle !== undefined) {
+        this.misses = 0;
+        hub.push({ id: LID.id, t: nowSeconds(), v: angle });
+      } else if (++this.misses % MAX_MISSES === 0) {
+        // A while without an answer: close it, so the next poll opens it afresh.
+        void device.close().catch(() => {});
+      }
     } finally {
       this.reading = false;
     }
