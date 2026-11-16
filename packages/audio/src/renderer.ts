@@ -82,7 +82,7 @@ const GLIDE = 0.025;
 /** Most a track's drive pushes into the shaper. */
 const MAX_DRIVE = 8;
 /** Delay feedback (around both echoes of the ping-pong) when no dub throw is playing. */
-const FEEDBACK = 0.4;
+const FEEDBACK = 0.3;
 /** What the second echo of the ping-pong keeps of the first. */
 const PONG = 0.7;
 /** Below this the mix is rumble no speaker plays and every compressor hears. */
@@ -140,6 +140,8 @@ export class Renderer {
   private readonly delayBus: GainNode;
   private readonly delay: DelayNode;
   private readonly delayPong: DelayNode;
+  /** Where the delay takes its input: the sends, and what it feeds back. */
+  private readonly delayIn: GainNode;
   private readonly feedback: GainNode;
   /** The style's own level, so every style plays about as loud. */
   private readonly trim: GainNode;
@@ -230,31 +232,45 @@ export class Renderer {
     this.feedback = ctx.createGain();
     this.feedback.gain.value = FEEDBACK;
     // A ping-pong: the first echo to one side, the second to the other, round again.
+    // The feedback loop holds one delay (twice the echo time) and has one way out, `damp`:
+    // the echoes on the first side are a delay beside the loop, fed by what goes in and by
+    // what comes round. A loop the rest of the graph can enter at two points is rendered
+    // either of two ways by the browser, a block of samples apart, from one run to the next.
     const damp = ctx.createBiquadFilter();
     damp.type = 'lowpass';
     damp.frequency.value = 3500;
     const thin = ctx.createBiquadFilter();
     thin.type = 'highpass';
     thin.frequency.value = RETURN_HP_HZ;
-    this.delayPong = ctx.createDelay(2);
+    this.delayPong = ctx.createDelay(4);
+    const first = ctx.createBiquadFilter();
+    first.type = 'lowpass';
+    first.frequency.value = 3500;
     const pong = ctx.createGain();
     pong.gain.value = PONG;
+    const round = ctx.createGain();
+    round.gain.value = FEEDBACK;
     const left = ctx.createStereoPanner();
     left.pan.value = -0.55;
     const right = ctx.createStereoPanner();
     right.pan.value = 0.55;
-    this.delayBus.connect(thin).connect(this.delay);
-    this.delay.connect(damp);
-    damp.connect(left).connect(this.dryBus);
-    damp.connect(pong).connect(this.delayPong);
-    this.delayPong.connect(right).connect(this.dryBus);
-    this.delayPong.connect(this.feedback).connect(this.delay);
+    this.delayIn = ctx.createGain();
+    this.delayBus.connect(thin).connect(this.delayIn);
+    // The loop: in → delay of two echoes → damp → feedback → in.
+    const loop = ctx.createGain();
+    this.delayIn.connect(loop).connect(this.delayPong).connect(damp);
+    damp.connect(this.feedback).connect(loop);
+    // Out of it: the second echo, and what comes round for the first side.
+    damp.connect(pong).connect(right).connect(this.dryBus);
+    this.delayIn.connect(this.delay);
+    damp.connect(round).connect(this.delay);
+    this.delay.connect(first).connect(left).connect(this.dryBus);
 
     // Triggered effects on the whole mix, before the master filter.
     this.perf = new PerformanceFx(ctx, {
       mix: this.mixBus,
       reverbIn: this.washIn,
-      delayIn: this.delay,
+      delayIn: this.delayIn,
       delayFeedback: this.feedback.gain,
       feedbackRest: FEEDBACK,
       noise: this.noise,
@@ -388,7 +404,7 @@ export class Renderer {
     this.stepSeconds = stepDuration(bpm);
     const time = Math.min(1.9, this.fx.delaySteps * this.stepSeconds);
     this.delay.delayTime.setTargetAtTime(time, this.ctx.currentTime, 0.05);
-    this.delayPong.delayTime.setTargetAtTime(time, this.ctx.currentTime, 0.05);
+    this.delayPong.delayTime.setTargetAtTime(2 * time, this.ctx.currentTime, 0.05);
   }
 
   /** Follows the engine: master filter, sends, wobble, crackle and every track's params. */
