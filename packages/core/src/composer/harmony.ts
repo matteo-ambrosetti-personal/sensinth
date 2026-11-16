@@ -167,6 +167,16 @@ export class Harmony {
     this.next = this.chooseNext(this.chord, inputs, false);
   }
 
+  /** Comes home: the tonic chord (the top of the form), for the last chord of a piece. */
+  home(inputs: Readonly<HarmonyInputs>): void {
+    if (this.palette.chordScales) {
+      this.startForm(inputs);
+      return;
+    }
+    this.chord = { degree: 0, size: this.sizeFor(inputs) };
+    this.next = this.chord;
+  }
+
   /** At phrase starts the mode may follow `brightness` (with hysteresis). Forms keep going. */
   onPhraseStart(inputs: Readonly<HarmonyInputs>): void {
     if (this.palette.chordScales) return;

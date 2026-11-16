@@ -1,6 +1,27 @@
 import type { NoteEvent } from './clock/events';
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from './clock/grid';
 import { Harmony, type HarmonyInputs } from './composer/harmony';
+import {
+  DEFAULT_MAX_SECONDS,
+  DEFAULT_MIN_SECONDS,
+  FINAL_BARS,
+  SECTION_DIAL,
+  arrange,
+  chooseSection,
+  partOf,
+  pickFeatured,
+  pickSoloist,
+  planBars,
+  sectionBars,
+  sectionLabel,
+  type Arrangement,
+  type ChosenBy,
+  type FormOptions,
+  type FormView,
+  type SectionKind,
+  type SectionView,
+} from './form/form';
+import { PieceRecorder, type PieceLog } from './form/log';
 import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
 import { genomeDistance, type KeyState, type TrackDistance } from './genome/distance';
 import { evolveGenome } from './genome/evolve';
@@ -15,12 +36,23 @@ import {
   type Genome,
 } from './genome/genome';
 import { mutatePhrase } from './genome/mutate';
-import { MACROS, defaultMacros, type Macros, type Triggers } from './mapping/macros';
 import {
+  MACROS,
+  MACRO_INFO,
+  defaultMacros,
+  type MacroId,
+  type Macros,
+  type Triggers,
+} from './mapping/macros';
+import {
+  MACRO_AREA,
+  destArea,
+  domainOf,
   domainsOf,
   partitionAreas,
   owns,
   type Area,
+  type Domain,
   type Partition,
   type PartitionLevel,
 } from './mapping/partition';
@@ -31,6 +63,7 @@ import {
   ModMatrix,
   globalDest,
   macroSource,
+  parseSensorSource,
   sensorSource,
   trackDest,
   type RouteView,
@@ -64,9 +97,16 @@ import {
   type Song,
   type SongSpec,
 } from './seeded/song';
+import { writeMelody } from './seq/generate';
 import { Realizer, type HarmonyContext } from './seq/realize';
 import { TrackRunner, type FiredTrig } from './seq/runner';
-import { cloneTrig, type TrackRole, type TrackSpec, type Trig } from './seq/types';
+import {
+  MAX_TRACK_LENGTH,
+  cloneTrig,
+  type TrackRole,
+  type TrackSpec,
+  type Trig,
+} from './seq/types';
 import { SensorHub, type ChannelState } from './sensors/hub';
 import { groupOf, type SensorDescriptor, type SensorEvent, type Timescale } from './sensors/types';
 import { driftOf, type FxConfig, type Machine, type Style } from './styles/schema';
@@ -84,6 +124,12 @@ export interface EngineOptions {
   keyRoot?: number;
   /** Deterministic mode: a looping song the inputs edit (see `DeterministicOptions`). */
   deterministic?: DeterministicOptions;
+  /**
+   * Plays a whole piece instead of going on for ever: an intro, sections the
+   * sensors choose between (riff, voice, solo, break), an outro and a last
+   * chord, three to five minutes in all. Not used in deterministic mode.
+   */
+  form?: FormOptions;
 }
 
 /**
@@ -191,6 +237,10 @@ export interface TrackView {
   base: Readonly<TrackParams>;
   /** Velocity of the trig played on the latest tick, 0 if none. */
   fired: number;
+  /** The arrangement rests it in this bar (it comes back with another section). */
+  resting?: boolean;
+  /** The section puts it forward: the riff's instrument, the voice, the soloist. */
+  featured?: boolean;
 }
 
 export interface EngineView {
@@ -213,6 +263,8 @@ export interface EngineView {
   partition: PartitionView;
   /** How far the music has moved from where it started. */
   drift: DriftView;
+  /** Where the piece is in its form, when it has one (see `EngineOptions.form`). */
+  form?: FormView;
 }
 
 /** The partition as the app shows it. */
@@ -248,6 +300,46 @@ const EVOLVE_SCENE = 0.65;
 const EVOLVE_RESUME = 0.5;
 /** Steps an effect may wait for its turn before it is dropped. */
 const FX_WAIT = 4;
+
+/** Sections of a piece counted in whole blues choruses when the style's own sections are. */
+const CHORUS_BARS = 12;
+/** Evolution rates of a piece's sections: a theme coming back, a new voice, a solo over the riff. */
+const FORM_RETURN = 0.1;
+const FORM_NEW_VOICE = 0.45;
+const FORM_BACKING = 0.05;
+/** What a fired effect, an accent and a fill are worth in a sensor's record. */
+const CREDIT_FX_STEP = 0.5;
+const CREDIT_ACCENT = 1;
+const CREDIT_FILL = 2;
+/** What a dial far from its rest is worth, per step, shared by the sensors driving it. */
+const CREDIT_DIAL = 0.5;
+
+/** The piece playing: its plan, its sections so far and their themes. */
+interface FormState {
+  minSeconds: number;
+  maxSeconds: number;
+  piece: number;
+  /** Bars the piece plans to last, the last chord included. */
+  totalBars: number;
+  /** The bar playing, from 0. */
+  bar: number;
+  barSeconds: number;
+  sections: SectionView[];
+  kinds: SectionKind[];
+  arrangement: Arrangement | undefined;
+  /** The genomes the riff and the voice come back to. */
+  themes: { riff?: Genome; voice?: Genome };
+  /** Slots that have taken a solo. */
+  soloists: string[];
+  /** Slots whose melody a section wrote: phrase mutations leave them alone. */
+  keep: Set<string>;
+  resting: ReadonlySet<string>;
+  /** Slots that rested on the previous step. */
+  rested: ReadonlySet<string>;
+  phase: 'playing' | 'final' | 'ended';
+  /** Step the last chord sounds on. */
+  finalStep: number;
+}
 
 /** Deterministic mode's state. */
 interface Seeded {
@@ -341,6 +433,7 @@ export class Engine {
   private anchor: Fingerprint | undefined;
   private farSteps = 0;
   private farChannel: string | undefined;
+  private farChannelId: string | undefined;
   private fillUntilStep = -1;
   private pendingAccent = 0;
   private readonly onsetEnv = new Map<string, number>();
@@ -349,7 +442,7 @@ export class Engine {
   /** Channels with an onset on the latest step. */
   private readonly freshOnsets = new Set<string>();
   /** Effects waiting to fire, in priority order; at most one fires per step. */
-  private fxQueue: { fx: FxId; depth: number; steps: number; until: number }[] = [];
+  private fxQueue: { fx: FxId; depth: number; steps: number; until: number; by?: string }[] = [];
   /** Step until which an exclusive effect (stutter, tape stop, …) holds the mix. */
   private fxBusyUntil = -1;
   /** The step effects are queued at: the absolute step, or the loop position in deterministic mode. */
@@ -382,6 +475,12 @@ export class Engine {
   private drift: DriftView = { bar: 0, total: 0, harmony: 0, tracks: [], history: [], marks: [] };
   private driftHistory: number[] = [];
   private driftMarks: { bar: number; reason: RebuildReason }[] = [];
+  /** The piece's form, when it has one. */
+  private form: FormState | undefined;
+  private formView: FormView | undefined;
+  /** The record of who did what, kept while a piece with a form plays. */
+  private recorder: PieceRecorder | undefined;
+  private stepSeconds = 0.125;
 
   constructor(opts: EngineOptions) {
     this.style = opts.style;
@@ -422,7 +521,48 @@ export class Engine {
         det.evolve = { bars: generationBars(loopBars), k: 0, spec: det.base };
       }
       this.keySource = 'seed';
+    } else if (opts.form) {
+      const f = opts.form;
+      this.form = {
+        minSeconds: f.minSeconds ?? DEFAULT_MIN_SECONDS,
+        maxSeconds: f.maxSeconds ?? DEFAULT_MAX_SECONDS,
+        piece: f.piece ?? 0,
+        totalBars: 0,
+        bar: 0,
+        barSeconds: 2,
+        sections: [],
+        kinds: [],
+        arrangement: undefined,
+        themes: {},
+        soloists: [],
+        keep: new Set(),
+        resting: new Set(),
+        rested: new Set(),
+        phase: 'playing',
+        finalStep: -1,
+      };
+      this.recorder = new PieceRecorder(this.form.piece, opts.style);
     }
+  }
+
+  /** True once a piece with a form has played its last chord and the bar of silence after it. */
+  get ended(): boolean {
+    return this.form?.phase === 'ended';
+  }
+
+  /**
+   * The link of the hash chain reached: a seed for the next piece, so each
+   * piece follows from every sensor reading that shaped the ones before.
+   */
+  get chainSeed(): number {
+    return this.chain;
+  }
+
+  /** The record of the piece so far: its form and how each sensor contributed. */
+  pieceLog(): PieceLog | undefined {
+    const log = this.recorder?.snapshot();
+    if (log && this.form) log.sections = this.form.sections.map((s) => ({ ...s }));
+    return log;
   }
 
   /** Which source and channel controls which areas, for the channels live now. */
@@ -490,6 +630,14 @@ export class Engine {
   tick(stepSeconds: number): NoteEvent[] {
     if (this.det) return this.tickSong(this.det, stepSeconds);
     const step = this.step++;
+    this.stepSeconds = stepSeconds;
+    const form = this.form;
+    // A piece that has ended stays silent: the caller starts the next one.
+    if (form?.phase === 'ended') {
+      this.router.update(stepSeconds);
+      this.trackState.clear();
+      return [];
+    }
     const live = this.liveChannels();
     this.updatePartition(live);
     const { macros, triggers } = this.router.update(stepSeconds);
@@ -522,10 +670,21 @@ export class Engine {
     } else if (stepInBar === 0 && this.applyPendingStyle()) {
       this.rebuild(step, this.fingerprinter.take(live), live, macros, 'style');
     } else {
+      if (form && stepInBar === 0) {
+        this.recorder?.endBar(stepSeconds * STEPS_PER_BAR);
+        form.bar++;
+        form.barSeconds = stepSeconds * STEPS_PER_BAR;
+      }
       this.boundaries(step, live, macros);
     }
     if (stepInBar === 0) this.measureDrift(step);
-    return this.play(step, live, macros, triggers);
+    // The bar line may have turned the piece to its last chord.
+    const events =
+      form && (form.phase as FormState['phase']) !== 'playing'
+        ? this.playFinal(form, step)
+        : this.play(step, live, macros, triggers);
+    if (form) this.refreshForm(form);
+    return events;
   }
 
   /**
@@ -632,7 +791,7 @@ export class Engine {
       chordName: sym.name,
       macros: { ...this.router.macros },
       waiting: this.waiting,
-      section: this.section,
+      section: this.form ? Math.max(0, this.form.sections.length - 1) : this.section,
       phrase: Math.floor(rel / STEPS_PER_BAR / phraseBars),
       genome: (this.genome?.chain ?? 0).toString(16).padStart(8, '0').slice(0, 6),
     };
@@ -669,6 +828,8 @@ export class Engine {
         params: { ...(state?.params ?? t.base) },
         base: { ...t.base },
         fired: state?.fired ?? 0,
+        ...(this.form?.resting.has(t.slot) ? { resting: true } : {}),
+        ...(this.form?.arrangement?.featured === t.slot ? { featured: true } : {}),
       };
     });
     const [lo, hi] = this.style.palette.swing;
@@ -685,6 +846,7 @@ export class Engine {
       ...(this.det ? { song: this.songView(this.det) } : {}),
       partition: this.partitionView,
       drift: this.drift,
+      ...(this.formView ? { form: this.formView } : {}),
     };
   }
 
@@ -1002,18 +1164,35 @@ export class Engine {
   /** Section ends, scene changes and phrase mutations, all on bar lines. */
   private boundaries(step: number, live: readonly ChannelState[], macros: Readonly<Macros>): void {
     const fp = this.fingerprinter.take(live);
-    const change = this.anchor
-      ? fingerprintChange(this.anchor, fp)
-      : { distance: 0, channel: undefined };
+    const form = this.form;
+    if (form && form.phase !== 'playing') {
+      // The last chord rings, then a bar of silence, then the piece is over.
+      if (step >= form.finalStep + FINAL_BARS * STEPS_PER_BAR) form.phase = 'ended';
+      return;
+    }
+    const kind = form?.kinds[form.kinds.length - 1];
+    // A piece's intro and outro play out whatever the sensors do.
+    const steady = kind === 'intro' || kind === 'outro';
+    const change =
+      this.anchor && !steady
+        ? fingerprintChange(this.anchor, fp)
+        : { distance: 0, channel: undefined };
     if (change.distance > SCENE_DISTANCE) {
       this.farSteps++;
       this.farChannel = change.channel?.label;
+      this.farChannelId = change.channel?.id;
       if (this.farSteps >= SCENE_HOLD && this.sceneAt === undefined) {
         // The next bar line with time to rise into it, once the scene has had its bars,
         // and never past the section's end, where it would be lost in the section's rebuild.
         let at = (Math.floor(step / STEPS_PER_BAR) + 1) * STEPS_PER_BAR;
         if (at - step < 4) at += STEPS_PER_BAR;
-        const end = this.sectionStart + this.style.palette.sectionBars * STEPS_PER_BAR;
+        const end = this.sectionEnd(step);
+        // In a piece, a new scene waits for the phrase to end.
+        if (form) {
+          const phrase = Math.max(1, this.style.palette.phraseBars);
+          const bars = this.barsIn(step) + (at - (step - (step % STEPS_PER_BAR))) / STEPS_PER_BAR;
+          at += ((phrase - (bars % phrase)) % phrase) * STEPS_PER_BAR;
+        }
         this.sceneAt = Math.min(
           Math.max(at, this.sectionStart + SCENE_MIN_BARS * STEPS_PER_BAR),
           end,
@@ -1032,13 +1211,28 @@ export class Engine {
     }
     if (step % STEPS_PER_BAR !== 0) return;
     const { palette } = this.style;
-    const barsIn = Math.floor((step - this.sectionStart) / STEPS_PER_BAR);
+    const barsIn = this.barsIn(step);
+    const sectionBars = this.sectionLength();
     // A section that ends while the sensors are far from where it started ends in a new
     // scene, even if they have not held there long enough to call one yet.
-    if (
+    const scene =
       (this.sceneAt !== undefined && step >= this.sceneAt) ||
-      (barsIn >= palette.sectionBars && this.farSteps > 0)
-    ) {
+      (barsIn >= sectionBars && this.farSteps > 0);
+    if (form) {
+      if (barsIn >= sectionBars && kind === 'outro') this.startFinal(form, step, macros);
+      else if (scene || barsIn >= sectionBars) {
+        this.section++;
+        this.nextSection(form, step, fp, live, macros, scene);
+      } else if (barsIn > 0 && barsIn % Math.max(1, palette.phraseBars) === 0 && this.genome) {
+        const amount = clamp(0.25 + 0.75 * macros.variation);
+        const rng = new Rng(hashInts(this.chain, form.bar, fp.fineHash));
+        this.mutations = mutatePhrase(this.genome, rng, amount, palette, form.keep);
+        this.patternVersion++;
+        this.harmony?.onPhraseStart(this.harmonyInputs(macros));
+      }
+      return;
+    }
+    if (scene) {
       this.section++;
       this.rebuild(step, fp, live, macros, 'scene');
     } else if (barsIn >= palette.sectionBars) {
@@ -1064,12 +1258,22 @@ export class Engine {
     live: readonly ChannelState[],
     macros: Readonly<Macros>,
     reason: RebuildReason,
+    /** A piece's section: the theme it goes back to, and how far it moves from it. */
+    from?: { base: Genome; rate: number },
   ): void {
     const prev = this.genome;
     this.chain = prev ? nextChain(this.chain, fp, this.section) : firstChain(this.seed0, fp);
     const fresh = buildGenome(this.style, fp, this.chain, this.section, macros, this.partition);
     let genome = fresh;
-    if (prev && (reason === 'section' || reason === 'scene' || reason === 'resume')) {
+    if (from) {
+      const evolved = evolveGenome(from.base, fresh, new Rng(hashInts(this.chain, 0xe701)), {
+        rate: from.rate,
+        drift: driftOf(this.style),
+        palette: this.style.palette,
+      });
+      genome = evolved.genome;
+      this.mutations = evolved.changes;
+    } else if (prev && (reason === 'section' || reason === 'scene' || reason === 'resume')) {
       const rate =
         reason === 'scene'
           ? EVOLVE_SCENE
@@ -1107,6 +1311,9 @@ export class Engine {
     this.genomeVersion++;
     this.patternVersion++;
     const channel = reason === 'scene' ? this.farChannel : undefined;
+    if (reason === 'scene' && this.farChannelId) {
+      this.recorder?.mark(this.farChannelId, 'scene', 'New scene');
+    }
     this.rebuildInfo = { reason, step, ...(channel ? { channel } : {}) };
     this.markDrift(step, reason);
 
@@ -1151,8 +1358,393 @@ export class Engine {
       };
       this.driftHistory = [];
       this.driftMarks = [{ bar: 0, reason }];
+      if (this.form) this.startPiece(this.form, fp, macros);
     }
+    this.recorder?.setStyle(this.style);
+    this.recorder?.setKey((this.harmony as Harmony).keyName);
   }
+
+  // A piece's form ----------------------------------------------------------
+
+  /** Bars into the section playing, at a bar line. */
+  private barsIn(step: number): number {
+    const form = this.form;
+    if (form) return form.bar - (form.sections[form.sections.length - 1]?.startBar ?? 0);
+    return Math.floor((step - this.sectionStart) / STEPS_PER_BAR);
+  }
+
+  /** Bars the section playing lasts. */
+  private sectionLength(): number {
+    const section = this.form?.sections[this.form.sections.length - 1];
+    return section ? section.bars : this.style.palette.sectionBars;
+  }
+
+  /** The step the section playing ends on. */
+  private sectionEnd(step: number): number {
+    const bar = step - (step % STEPS_PER_BAR);
+    return bar + Math.max(0, this.sectionLength() - this.barsIn(bar)) * STEPS_PER_BAR;
+  }
+
+  /** Sections count in phrases; in whole choruses where the style's own sections do. */
+  private formUnit(): number {
+    const { palette } = this.style;
+    return palette.chordScales && palette.sectionBars % CHORUS_BARS === 0
+      ? CHORUS_BARS
+      : Math.max(1, palette.phraseBars);
+  }
+
+  /** The first bar of a piece: how long it will last, and its intro. */
+  private startPiece(form: FormState, fp: Fingerprint, macros: Readonly<Macros>): void {
+    const genome = this.genome as Genome;
+    form.bar = 0;
+    form.barSeconds = this.stepSeconds * STEPS_PER_BAR;
+    form.phase = 'playing';
+    form.sections = [];
+    form.kinds = [];
+    form.soloists = [];
+    form.themes = { riff: cloneGenome(genome) };
+    // The fine detail of the readings picks the length inside the range.
+    const pick = hashInts(this.chain, fp.fineHash, 0x1e9) / 2 ** 32;
+    form.totalBars = planBars(form.barSeconds, pick, form.minSeconds, form.maxSeconds);
+    this.openSection(form, 'intro', fp, macros, undefined);
+  }
+
+  /**
+   * Opens a section on the genome just written: who is put forward, the
+   * melody a voice or a solo asks for, and who rests on which bar.
+   */
+  private openSection(
+    form: FormState,
+    kind: SectionKind,
+    fp: Fingerprint,
+    macros: Readonly<Macros>,
+    chosenBy: ChosenBy | undefined,
+    barsCap = Infinity,
+  ): void {
+    const genome = this.genome as Genome;
+    const { palette } = this.style;
+    const tracks = genome.tracks.filter((t) => t.role !== 'fx');
+    const nth = form.kinds.filter((k) => k === kind).length;
+    const rng = new Rng(hashInts(this.chain, fp.fineHash, form.kinds.length, 0xf0f1));
+    const unit = this.formUnit();
+    const step =
+      kind === 'intro' || kind === 'outro' || kind === 'break' ? Math.min(unit, 4) : unit;
+    // Calm sensors take their time; busy ones move on.
+    const wanted = sectionBars(
+      kind,
+      form.barSeconds,
+      unit,
+      kind === 'break' ? 0.5 : 1 - macros.energy,
+    );
+    const bars = Math.max(step, Math.min(wanted, Math.floor(barsCap / step) * step));
+
+    form.keep = new Set();
+    let soloist: TrackSpec | undefined;
+    if (kind === 'voice') {
+      const voice = pickFeatured(tracks, ['lead', 'arp', 'chords', 'pad']);
+      const theme = form.themes.voice?.tracks.find(
+        (t) => t.slot === voice?.slot && t.machine === voice.machine,
+      );
+      if (voice && voice.role !== 'pad') {
+        if (theme) {
+          // The voice sings its line again.
+          voice.trigs = theme.trigs.map((t) => (t ? cloneTrig(t) : undefined));
+          voice.length = theme.length;
+          voice.scale = theme.scale;
+        } else {
+          voice.trigs = writeMelody(
+            rng,
+            voice,
+            palette.machines[voice.machine],
+            'voice',
+            genome.density,
+          );
+          voice.length = MAX_TRACK_LENGTH;
+          voice.scale = 1;
+        }
+        form.keep.add(voice.slot);
+      }
+      form.themes.voice = cloneGenome(genome);
+    } else if (kind === 'riff') {
+      form.themes.riff = cloneGenome(genome);
+    } else if (kind === 'solo') {
+      soloist = pickSoloist(tracks, rng, form.soloists);
+      if (soloist) {
+        form.soloists.push(soloist.slot);
+        soloist.trigs = writeMelody(
+          rng,
+          soloist,
+          palette.machines[soloist.machine],
+          'solo',
+          clamp(0.3 + 0.7 * macros.energy),
+        );
+        soloist.length = MAX_TRACK_LENGTH;
+        soloist.scale = 1;
+        form.keep.add(soloist.slot);
+      }
+    }
+    const arrangement = arrange({
+      kind,
+      bars,
+      tracks,
+      nth,
+      rng,
+      energy: macros.energy,
+      ...(soloist ? { soloist: soloist.slot } : {}),
+    });
+    form.arrangement = arrangement;
+    const featured = tracks.find((t) => t.slot === arrangement.featured);
+    const label = featured ? (palette.machines[featured.machine]?.label ?? featured.machine) : '';
+    // A section a new scene cut short lasted as long as it played.
+    const before = form.sections[form.sections.length - 1];
+    if (before && before.startBar + before.bars !== form.bar) {
+      form.sections = [
+        ...form.sections.slice(0, -1),
+        { ...before, bars: Math.max(1, form.bar - before.startBar) },
+      ];
+    }
+    const section: SectionView = {
+      kind,
+      label: sectionLabel(kind, nth, label),
+      startBar: form.bar,
+      bars,
+      ...(featured ? { featured: { slot: featured.slot, label } } : {}),
+      ...(chosenBy ? { chosenBy } : {}),
+    };
+    form.kinds = [...form.kinds, kind];
+    form.sections = [...form.sections, section];
+    form.resting = arrangement.resting(0);
+    this.patternVersion++;
+    this.recorder?.chose(chosenBy, section.label);
+  }
+
+  /** The sensor that drives a dial most, with the word for what it did. */
+  private dialOwner(macro: MacroId, why: string): ChosenBy | undefined {
+    let best: { id: string; weight: number } | undefined;
+    for (const r of this.router.getRoutes().macros) {
+      if (r.macro !== macro) continue;
+      const ch = this.hub.get(r.channelId);
+      if (!ch || ch.stale) continue;
+      if (!best || r.weight > best.weight) best = { id: r.channelId, weight: r.weight };
+    }
+    const ch = best && this.hub.get(best.id);
+    return ch ? { channelId: ch.desc.id, label: ch.desc.label, why } : undefined;
+  }
+
+  /**
+   * The next section of a piece. The sensors' dials choose its kind (or a
+   * scene change cuts to it); a riff or a voice goes back to its theme and
+   * moves on a little from it, a solo and the outro play over the riff.
+   */
+  private nextSection(
+    form: FormState,
+    step: number,
+    fp: Fingerprint,
+    live: readonly ChannelState[],
+    macros: Readonly<Macros>,
+    scene: boolean,
+  ): void {
+    const unit = this.formUnit();
+    const outroBars = sectionBars('outro', form.barSeconds, unit, 1 - macros.energy);
+    const left = form.totalBars - FINAL_BARS - form.bar - outroBars;
+    const rng = new Rng(hashInts(this.chain, fp.fineHash, form.kinds.length, 0xf0f0));
+    const kind = chooseSection({
+      history: form.kinds,
+      barsLeft: left - (unit - 1),
+      macros,
+      rng,
+      contrast: scene,
+    });
+    const riff = form.themes.riff ?? (this.genome as Genome);
+    const base =
+      kind === 'voice'
+        ? (form.themes.voice ?? riff)
+        : kind === 'break'
+          ? (this.genome ?? riff)
+          : riff;
+    const rate = scene
+      ? EVOLVE_SCENE
+      : kind === 'voice' && !form.themes.voice
+        ? FORM_NEW_VOICE
+        : kind === 'riff' || kind === 'voice'
+          ? FORM_RETURN * (0.5 + macros.variation)
+          : FORM_BACKING;
+    // A new scene moves the piece on: the voice it comes back to will be a new one.
+    if (scene) form.themes = { riff };
+    let chosenBy: ChosenBy | undefined;
+    if (scene && this.farChannelId) {
+      chosenBy = { channelId: this.farChannelId, label: this.farChannel ?? '', why: 'moved' };
+    } else if (kind !== 'outro') {
+      const dial = SECTION_DIAL[kind];
+      chosenBy = this.dialOwner(dial.macro, dial.why);
+    }
+    this.rebuild(step, fp, live, macros, scene ? 'scene' : 'section', { base, rate });
+    this.openSection(form, kind, fp, macros, chosenBy, kind === 'outro' ? Infinity : left);
+  }
+
+  /** The outro is over: the band comes home on one last chord. */
+  private startFinal(form: FormState, step: number, macros: Readonly<Macros>): void {
+    form.phase = 'final';
+    form.finalStep = step;
+    form.resting = new Set();
+    form.arrangement = undefined;
+    this.harmony?.home(this.harmonyInputs(macros));
+    if (this.recorder) this.recorder.complete = true;
+  }
+
+  /** The last chord on its first step, then silence. */
+  private playFinal(form: FormState, step: number): NoteEvent[] {
+    const harmony = this.harmony;
+    const events: NoteEvent[] = [];
+    this.fxQueue = [];
+    if (step === form.finalStep && harmony) {
+      const h: HarmonyContext = {
+        scale: harmony.scale,
+        chord: harmony.chord,
+        nextRoot: harmony.nextRoot,
+        chordMoves: false,
+        key: harmony.root,
+        stepsUntilChordChange: FINAL_BARS * STEPS_PER_BAR,
+        stepInBar: 0,
+      };
+      const hold: Partial<Record<TrackRole, number>> = {
+        bass: 12,
+        chords: 14,
+        pad: 16,
+        drone: 16,
+        lead: 10,
+        arp: 8,
+      };
+      let cymbal = false;
+      for (const runner of this.runners) {
+        const spec = runner.spec;
+        const part = partOf(spec);
+        if (!part) continue;
+        const params = { ...spec.base };
+        let vel = 0;
+        if (spec.role === 'drum') {
+          // One hit to land on: the kick, and one cymbal or the snare over it.
+          if (part === 'kick') vel = 0.85;
+          else if ((part === 'hats' || part === 'snare') && !cymbal) {
+            cymbal = true;
+            vel = 0.6;
+          }
+          if (vel > 0) {
+            events.push({
+              part: spec.slot,
+              role: 'drum',
+              step,
+              durSteps: 2,
+              vel,
+              voice: spec.voice ?? 'perc',
+              params,
+            });
+          }
+        } else {
+          vel = 0.78;
+          const len = hold[spec.role] ?? 8;
+          const realizer = this.realizers.get(spec.slot) ?? new Realizer();
+          const note = { tone: 0, chord: true, oct: 0 };
+          for (const midi of realizer.notes(spec, note, h, params.tune, len)) {
+            events.push({
+              part: spec.slot,
+              role: spec.role,
+              step,
+              durSteps: len,
+              vel,
+              midi,
+              params,
+            });
+          }
+        }
+        this.trackState.set(spec.slot, { params, fired: vel });
+      }
+    } else {
+      for (const state of this.trackState.values()) state.fired = 0;
+    }
+    return capEvents(events, Math.max(8, this.style.palette.maxEventsPerStep));
+  }
+
+  /** The form as the app sees it, refreshed every step. */
+  private refreshForm(form: FormState): void {
+    const section = form.sections[form.sections.length - 1];
+    const prev = this.formView;
+    const resting = prev && sameSet(prev.resting, form.resting) ? prev.resting : [...form.resting];
+    this.formView = {
+      piece: form.piece,
+      sections: form.sections,
+      barInSection: form.bar - (section?.startBar ?? 0),
+      bar: form.bar,
+      totalBars: form.totalBars,
+      resting,
+      ending: form.phase !== 'playing',
+      ended: form.phase === 'ended',
+    };
+  }
+
+  /** Every live sensor's reading, and what its routes and dials moved on this step. */
+  private credit(live: readonly ChannelState[], matrix: ModMatrix, macros: Readonly<Macros>): void {
+    const rec = this.recorder;
+    if (!rec) return;
+    const partition = this.partition;
+    for (const ch of live) {
+      rec.reading({
+        id: ch.desc.id,
+        label: ch.desc.label,
+        group: groupOf(ch.desc),
+        kind: ch.desc.kind,
+        ...(ch.desc.unit ? { unit: ch.desc.unit } : {}),
+        areas: partition?.channels[ch.desc.id] ?? [],
+        level: ch.features.level,
+        activity: ch.features.activity,
+      });
+    }
+    const roles = new Map(this.runners.map((r) => [r.spec.slot, r.spec.role as string]));
+    const roleOf = (slot: string) => roles.get(slot);
+    const drivers = this.dialDrivers();
+    const viaDial = (macro: MacroId, amount: number, domain: Domain) => {
+      for (const d of drivers.get(macro) ?? []) rec.credit(d.id, domain, amount * d.share);
+    };
+    matrix.eachContribution((r, value) => {
+      const amount = Math.abs(value);
+      if (amount < 1e-4) return;
+      const area = destArea(r.dest, roleOf);
+      if (r.source.startsWith('s:')) {
+        if (area) rec.credit(parseSensorSource(r.source).channelId, domainOf(area), amount);
+      } else if (r.source.startsWith('m:')) {
+        const macro = r.source.slice(2) as MacroId;
+        viaDial(macro, amount, domainOf(area ?? MACRO_AREA[macro]));
+      }
+    });
+    // What the dials do on their own: note density, chords, the mode, the room.
+    for (const m of MACROS) {
+      const far = Math.abs(macros[m] - MACRO_INFO[m].fallback) * 2;
+      viaDial(m, CREDIT_DIAL * far, domainOf(MACRO_AREA[m]));
+    }
+    rec.step();
+  }
+
+  /** Who drives each dial, with their shares of it. */
+  private dialDrivers(): Map<MacroId, { id: string; share: number }[]> {
+    const routes = this.router.getRoutes().macros;
+    if (routes === this.driversFor) return this.drivers;
+    this.driversFor = routes;
+    const out = new Map<MacroId, { id: string; share: number }[]>();
+    for (const m of MACROS) {
+      const mine = routes.filter((r) => r.macro === m);
+      const total = mine.reduce((a, r) => a + r.weight, 0);
+      if (total > 0)
+        out.set(
+          m,
+          mine.map((r) => ({ id: r.channelId, share: r.weight / total })),
+        );
+    }
+    this.drivers = out;
+    return out;
+  }
+
+  private drivers = new Map<MacroId, { id: string; share: number }[]>();
+  private driversFor: unknown;
 
   /** True when the chord after the one starting at `rel` starts a phrase. */
   private chordStartsPhrase(rel: number, chordSteps: number): boolean {
@@ -1243,6 +1835,14 @@ export class Engine {
     const offsets = matrix.evaluate();
     const off = (id: string) => offsets.get(id) ?? 0;
     this.globals = globalsFrom(macros, genome.swing, offsets);
+    this.credit(live, matrix, macros);
+    const form = this.form;
+    const sectionBars = this.sectionLength();
+    const barsInSection = form ? this.barsIn(step) : Math.floor(rel / STEPS_PER_BAR);
+    const kind = form?.kinds[form.kinds.length - 1];
+    if (form && stepInBar === 0 && form.arrangement) {
+      form.resting = form.arrangement.resting(barsInSection);
+    }
 
     // Harmony: chords change on the genome's chord rate, counted from the section start.
     const chordSteps = Math.max(1, Math.round(genome.harmony.chordRateBars * STEPS_PER_BAR));
@@ -1261,26 +1861,44 @@ export class Engine {
 
     // Fills: the last bar of a phrase sometimes, the end of a section always, or on request.
     if (stepInBar === 0) {
-      const barsIn = Math.floor(rel / STEPS_PER_BAR);
+      const barsIn = barsInSection;
       const phraseBars = Math.max(1, palette.phraseBars);
       const lastOfPhrase = barsIn % phraseBars === phraseBars - 1;
-      const lastOfSection = barsIn === palette.sectionBars - 1;
+      const lastOfSection = barsIn === sectionBars - 1;
       const auto = new Rng(hashInts(this.chain, barsIn, 0xf111)).chance(macros.variation * 0.6);
-      if (lastOfSection || (lastOfPhrase && auto)) this.fillUntilStep = step + STEPS_PER_BAR;
+      // An intro and an outro stay plain: the band is coming in, or leaving.
+      const plain = kind === 'intro' || kind === 'outro';
+      if ((lastOfSection && kind !== 'outro') || (lastOfPhrase && auto && !plain)) {
+        this.fillUntilStep = step + STEPS_PER_BAR;
+      }
     }
-    if (triggers.fill > 0)
+    if (triggers.fill > 0) {
       this.fillUntilStep = Math.max(this.fillUntilStep, step + STEPS_PER_BAR - stepInBar);
+      this.creditTrigger('fill', stepInBar);
+    }
     const fill = step < this.fillUntilStep;
-    if (triggers.accent > 0) this.pendingAccent = Math.max(this.pendingAccent, triggers.accent);
+    if (triggers.accent > 0) {
+      this.pendingAccent = Math.max(this.pendingAccent, triggers.accent);
+      this.creditTrigger('accent', stepInBar);
+    }
 
     const events: NoteEvent[] = [];
     const fired = new Map<string, number>();
-    const sectionLeft = palette.sectionBars * STEPS_PER_BAR - rel;
+    const sectionLeft = Math.max(1, this.sectionEnd(step) - step);
     let nei = false;
     // Sensor events fire effects first, so a shake or a clap answers at once.
     this.sensorFx(live);
+    const lastBar = barsInSection === sectionBars - 1;
+    // A break and a long intro rise into what follows.
+    if (
+      lastBar &&
+      stepInBar === 8 &&
+      (kind === 'break' || (kind === 'intro' && sectionBars >= 8))
+    ) {
+      this.queueFx('sweep', 0.7, 8);
+    }
     // The end of a section sometimes stutters, brakes or stops into the next one.
-    if (rel % STEPS_PER_BAR === 12 && Math.floor(rel / STEPS_PER_BAR) === palette.sectionBars - 1) {
+    if (stepInBar === 12 && lastBar && kind !== 'intro' && kind !== 'outro' && kind !== 'break') {
       const rng = new Rng(hashInts(this.chain, 0x57a7));
       const allowed = palette.effects ?? FX_IDS;
       const endings = SECTION_ENDINGS.filter(([fx]) => allowed.includes(fx));
@@ -1295,18 +1913,29 @@ export class Engine {
       for (const p of TRACK_PARAMS) params[p] = clamp(spec.base[p] + off(trackDest(spec.slot, p)));
       let trigs = runner.step(rel, params, { fill, nei });
       if (spec.role === 'fx') {
-        for (const f of trigs) if (f.trig.fx) this.queueFx(f.trig.fx, f.trig.vel, f.len);
+        // The effects lane waits while the band comes in and while it leaves.
+        if (kind !== 'intro' && kind !== 'outro') {
+          for (const f of trigs) if (f.trig.fx) this.queueFx(f.trig.fx, f.trig.vel, f.len);
+        }
         this.trackState.set(spec.slot, { params, fired: 0 });
         continue;
       }
       nei = runner.lastCond;
       const realizer = this.realizers.get(spec.slot) as Realizer;
+      // The arrangement rests this track: it keeps counting, and plays nothing.
+      if (form?.resting.has(spec.slot)) {
+        this.trackState.set(spec.slot, { params, fired: 0 });
+        continue;
+      }
+      if (form?.arrangement) params.level = clamp(params.level + form.arrangement.trim(spec.slot));
+      // A held part that comes back from a rest starts its note on the bar line.
+      const back = !!form?.rested.has(spec.slot) && (spec.role === 'drone' || spec.role === 'pad');
       // A drone whose note left the key restarts on the bar line.
       if (
-        spec.role === 'drone' &&
+        (spec.role === 'drone' || back) &&
         stepInBar === 0 &&
         trigs.length === 0 &&
-        realizer.droneStale(h.scale)
+        (back || realizer.droneStale(h.scale))
       ) {
         const fallback: Trig = {
           vel: 0.7,
@@ -1320,7 +1949,7 @@ export class Engine {
             trig: spec.trigs.find((t) => t) ?? fallback,
             index: 0,
             micro: 0,
-            len: spec.length / spec.scale,
+            len: spec.role === 'drone' ? spec.length / spec.scale : STEPS_PER_BAR,
           },
         ];
       }
@@ -1345,6 +1974,7 @@ export class Engine {
       const lane = this.trackState.get('fx');
       if (lane) lane.fired = fx.vel;
     }
+    if (form) form.rested = form.resting;
 
     matrix.advance(offsets, fired);
     const out = capEvents(events, palette.maxEventsPerStep);
@@ -1352,23 +1982,42 @@ export class Engine {
     return out;
   }
 
-  private queueFx(fx: FxId, depth: number, steps: number): void {
+  private queueFx(fx: FxId, depth: number, steps: number, by?: string): void {
     const allowed = this.style.palette.effects ?? FX_IDS;
     if (!allowed.includes(fx)) return;
-    this.fxQueue.push({ fx, depth, steps: Math.max(1, steps), until: this.fxNow + FX_WAIT });
+    this.fxQueue.push({
+      fx,
+      depth,
+      steps: Math.max(1, steps),
+      until: this.fxNow + FX_WAIT,
+      ...(by ? { by } : {}),
+    });
+  }
+
+  /** An accent or a fill goes to the sensors whose events asked for it. */
+  private creditTrigger(trigger: 'accent' | 'fill', stepInBar: number): void {
+    const rec = this.recorder;
+    if (!rec) return;
+    for (const r of this.router.getRoutes().triggers) {
+      if (r.trigger !== trigger || !this.freshOnsets.has(r.channelId)) continue;
+      rec.mark(r.channelId, trigger, trigger === 'fill' ? 'Fill' : 'Accent', stepInBar / 4);
+      rec.credit(r.channelId, 'rhythm', trigger === 'fill' ? CREDIT_FILL : CREDIT_ACCENT);
+    }
   }
 
   /** Effects fired by sensor events: onsets, or the lid closing fast. */
   private sensorFx(live: readonly ChannelState[]): void {
     const triggers = this.genome?.fxTriggers ?? [];
     for (const t of triggers) {
-      if (this.freshOnsets.has(t.channelId)) this.queueFx(t.fx, 0.9, FX_INFO[t.fx].steps);
+      if (this.freshOnsets.has(t.channelId)) {
+        this.queueFx(t.fx, 0.9, FX_INFO[t.fx].steps, t.channelId);
+      }
     }
     for (const ch of live) {
       if (ch.desc.kind !== 'lid.angle' || !owns(this.partition, ch.desc.id, 'space.fx')) continue;
       if (!this.lidLatch && ch.features.trend < -0.6) {
         this.lidLatch = true;
-        this.queueFx('tapeStop', 1, FX_INFO.tapeStop.steps);
+        this.queueFx('tapeStop', 1, FX_INFO.tapeStop.steps, ch.desc.id);
       } else if (ch.features.trend > -0.2) {
         this.lidLatch = false;
       }
@@ -1394,6 +2043,10 @@ export class Engine {
       this.fxQueue = this.fxQueue.filter((q) => q.fx !== c.fx);
       this.fxCooldown.set(c.fx, step + c.steps + info.rest);
       if (info.exclusive) this.fxBusyUntil = step + c.steps;
+      if (c.by && this.recorder) {
+        this.recorder.mark(c.by, 'fx', info.label, (step % STEPS_PER_BAR) / 4);
+        this.recorder.credit(c.by, 'space', CREDIT_FX_STEP * c.steps);
+      }
       return {
         part: 'fx',
         role: 'fx',
@@ -1451,7 +2104,9 @@ export class Engine {
   }
 
   private accent(events: NoteEvent[], step: number, fired: Map<string, number>): void {
-    const drums = this.runners.map((r) => r.spec).filter((t) => t.role === 'drum');
+    const drums = this.runners
+      .map((r) => r.spec)
+      .filter((t) => t.role === 'drum' && !this.form?.resting.has(t.slot));
     if (drums.length === 0) return;
     const rank = (t: TrackSpec) => {
       const i = ACCENT_VOICES.indexOf(t.voice ?? '');
@@ -1478,6 +2133,10 @@ export class Engine {
     const state = this.trackState.get(track.slot);
     if (state) state.fired = Math.max(state.fired, vel);
   }
+}
+
+function sameSet(a: readonly string[], b: ReadonlySet<string>): boolean {
+  return a.length === b.size && a.every((x) => b.has(x));
 }
 
 /** The globals of a step: the dials plus what the matrix routes into them. */
