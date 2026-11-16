@@ -10,9 +10,37 @@ export class Gfx {
     readonly h: number,
   ) {}
 
+  /** The piece's own tint: every colour drawn is turned by `hue` degrees and warmed or cooled. */
+  private hue = 0;
+  private sat = 1;
+  private readonly tinted = new Map<string, string>();
+
+  /**
+   * Turns every colour drawn from now on by `hue` degrees around the colour
+   * wheel, with `sat` times the saturation: each piece gets its own palette
+   * out of the same scene. `setTint(0)` draws colours as written.
+   */
+  setTint(hue: number, sat = 1): void {
+    if (hue === this.hue && sat === this.sat) return;
+    this.hue = hue;
+    this.sat = sat;
+    this.tinted.clear();
+  }
+
+  private c(color: string): string {
+    if ((this.hue === 0 && this.sat === 1) || color.charCodeAt(0) !== 35) return color;
+    let out = this.tinted.get(color);
+    if (out === undefined) {
+      out = turn(color, this.hue, this.sat);
+      if (this.tinted.size > 4096) this.tinted.clear();
+      this.tinted.set(color, out);
+    }
+    return out;
+  }
+
   rect(x: number, y: number, w: number, h: number, color: string): void {
     if (w <= 0 || h <= 0) return;
-    this.ctx.fillStyle = color;
+    this.ctx.fillStyle = this.c(color);
     this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
   }
 
@@ -31,7 +59,7 @@ export class Gfx {
     const sx = x < xe ? 1 : -1;
     const sy = y < ye ? 1 : -1;
     let err = dx + dy;
-    this.ctx.fillStyle = color;
+    this.ctx.fillStyle = this.c(color);
     for (let guard = 0; guard < 512; guard++) {
       this.ctx.fillRect(x, y, size, size);
       if (x === xe && y === ye) break;
@@ -50,7 +78,7 @@ export class Gfx {
   /** A filled circle (or ellipse with `ry`). */
   circle(cx: number, cy: number, r: number, color: string, ry = r): void {
     if (r <= 0 || ry <= 0) return;
-    this.ctx.fillStyle = color;
+    this.ctx.fillStyle = this.c(color);
     const rr = Math.round(ry);
     for (let dy = -rr; dy <= rr; dy++) {
       const half = Math.round(r * Math.sqrt(Math.max(0, 1 - (dy / ry) ** 2)));
@@ -61,7 +89,7 @@ export class Gfx {
   /** An ellipse outline. */
   ring(cx: number, cy: number, rx: number, ry: number, color: string): void {
     const steps = Math.max(12, Math.round((rx + ry) * 3));
-    this.ctx.fillStyle = color;
+    this.ctx.fillStyle = this.c(color);
     for (let i = 0; i < steps; i++) {
       const a = (i / steps) * Math.PI * 2;
       this.ctx.fillRect(Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry), 1, 1);
@@ -82,7 +110,7 @@ export class Gfx {
   text(str: string, x: number, y: number, color: string, scale = 1, shadow?: string): number {
     if (shadow) this.text(str, x + scale, y + scale, shadow, scale);
     let cx = Math.round(x);
-    this.ctx.fillStyle = color;
+    this.ctx.fillStyle = this.c(color);
     for (const ch of str.toUpperCase()) {
       const glyph = FONT[ch] ?? FONT['?'];
       const rows = glyph as readonly string[];
@@ -104,6 +132,40 @@ export class Gfx {
     for (const ch of str.toUpperCase()) w += ((FONT[ch] ?? FONT['?'])?.[0]?.length ?? 3) + 1;
     return Math.max(0, w - 1) * scale;
   }
+}
+
+/** A colour turned `degrees` around the wheel, keeping its lightness; greys stay grey. */
+export function turn(color: string, degrees: number, sat = 1): string {
+  const [r, g, b] = parse(color).map((v) => v / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  if (d < 0.04) return color;
+  const s0 = d / (1 - Math.abs(2 * l - 1) || 1);
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (((h * 60 + degrees) % 360) + 360) % 360;
+  const s1 = Math.min(1, s0 * sat);
+  const c = (1 - Math.abs(2 * l - 1)) * s1;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const [r1, g1, b1] =
+    h < 60
+      ? [c, x, 0]
+      : h < 120
+        ? [x, c, 0]
+        : h < 180
+          ? [0, c, x]
+          : h < 240
+            ? [0, x, c]
+            : h < 300
+              ? [x, 0, c]
+              : [c, 0, x];
+  const hex = (v: number) =>
+    Math.round(Math.min(1, Math.max(0, v + m)) * 255)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${hex(r1)}${hex(g1)}${hex(b1)}`;
 }
 
 /** A colour between `a` and `b` (both #rrggbb), `t` 0..1. */
@@ -179,6 +241,8 @@ const FONT: Record<string, readonly string[]> = {
   ':': ['.', '#', '.', '#', '.'],
   '!': ['#', '#', '#', '.', '#'],
   '?': ['##.', '..#', '.#.', '...', '.#.'],
+  '(': ['.#', '#.', '#.', '#.', '.#'],
+  ')': ['#.', '.#', '.#', '.#', '#.'],
   '-': ['...', '...', '###', '...', '...'],
   '+': ['...', '.#.', '###', '.#.', '...'],
   '/': ['..#', '..#', '.#.', '#..', '#..'],

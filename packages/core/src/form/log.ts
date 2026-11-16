@@ -1,5 +1,5 @@
 import { DOMAINS, type Area, type Domain } from '../mapping/partition';
-import type { ChosenBy, SectionView } from './form';
+import type { SectionView } from './form';
 
 /** Something a sensor did at one moment of a piece. */
 export interface SensorMark {
@@ -168,11 +168,6 @@ export class PieceRecorder {
     if (!r) return;
     r.trace.marks.push({ at: this.bars + Math.min(0.99, Math.max(0, beat / 4)), what, label });
     if (r.trace.marks.length > 400) r.trace.marks.shift();
-  }
-
-  /** A section's choice goes to the sensor that tipped it. */
-  chose(by: ChosenBy | undefined, label: string): void {
-    if (by) this.mark(by.channelId, 'section', label);
   }
 
   step(): void {

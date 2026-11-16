@@ -21,7 +21,7 @@ import {
   type SectionKind,
   type SectionView,
 } from './form/form';
-import { PieceRecorder, type PieceLog } from './form/log';
+import { PieceRecorder, type PieceLog, type SensorMark } from './form/log';
 import { FX_IDS, FX_INFO, type FxId } from './fx/effects';
 import { genomeDistance, type KeyState, type TrackDistance } from './genome/distance';
 import { evolveGenome } from './genome/evolve';
@@ -265,6 +265,18 @@ export interface EngineView {
   drift: DriftView;
   /** Where the piece is in its form, when it has one (see `EngineOptions.form`). */
   form?: FormView;
+  /** What sensors did on this very step: an effect fired, an accent, a new scene, a section chosen. */
+  news: readonly SensorNews[];
+}
+
+/** Something a sensor just did, for the screen to say. */
+export interface SensorNews {
+  channelId: string;
+  /** The sensor's name. */
+  sensor: string;
+  what: SensorMark['what'];
+  /** What it did: "Stutter", "Accent", "New scene", "Solo: Tenor sax". */
+  text: string;
 }
 
 /** The partition as the app shows it. */
@@ -313,6 +325,13 @@ const CREDIT_ACCENT = 1;
 const CREDIT_FILL = 2;
 /** What a dial far from its rest is worth, per step, shared by the sensors driving it. */
 const CREDIT_DIAL = 0.5;
+/**
+ * A sensor that holds still only sets a value; one that moves plays. What a
+ * link holds counts a little, what it changes from one step to the next
+ * counts for much more.
+ */
+const CREDIT_HELD = 0.2;
+const CREDIT_MOVED = 8;
 
 /** The piece playing: its plan, its sections so far and their themes. */
 interface FormState {
@@ -481,6 +500,8 @@ export class Engine {
   /** The record of who did what, kept while a piece with a form plays. */
   private recorder: PieceRecorder | undefined;
   private stepSeconds = 0.125;
+  /** What sensors did on the latest step. */
+  private news: SensorNews[] = [];
 
   constructor(opts: EngineOptions) {
     this.style = opts.style;
@@ -631,6 +652,7 @@ export class Engine {
     if (this.det) return this.tickSong(this.det, stepSeconds);
     const step = this.step++;
     this.stepSeconds = stepSeconds;
+    if (this.news.length > 0) this.news = [];
     const form = this.form;
     // A piece that has ended stays silent: the caller starts the next one.
     if (form?.phase === 'ended') {
@@ -847,6 +869,7 @@ export class Engine {
       partition: this.partitionView,
       drift: this.drift,
       ...(this.formView ? { form: this.formView } : {}),
+      news: this.news,
     };
   }
 
@@ -1311,9 +1334,7 @@ export class Engine {
     this.genomeVersion++;
     this.patternVersion++;
     const channel = reason === 'scene' ? this.farChannel : undefined;
-    if (reason === 'scene' && this.farChannelId) {
-      this.recorder?.mark(this.farChannelId, 'scene', 'New scene');
-    }
+    if (reason === 'scene' && this.farChannelId) this.tell(this.farChannelId, 'scene', 'New scene');
     this.rebuildInfo = { reason, step, ...(channel ? { channel } : {}) };
     this.markDrift(step, reason);
 
@@ -1515,7 +1536,7 @@ export class Engine {
     form.sections = [...form.sections, section];
     form.resting = arrangement.resting(0);
     this.patternVersion++;
-    this.recorder?.chose(chosenBy, section.label);
+    if (chosenBy) this.tell(chosenBy.channelId, 'section', section.label);
   }
 
   /** The sensor that drives a dial most, with the word for what it did. */
@@ -1705,8 +1726,15 @@ export class Engine {
     const viaDial = (macro: MacroId, amount: number, domain: Domain) => {
       for (const d of drivers.get(macro) ?? []) rec.credit(d.id, domain, amount * d.share);
     };
+    const before = this.creditBefore.matrix === matrix ? this.creditBefore : undefined;
+    const now: number[] = [];
+    let i = 0;
     matrix.eachContribution((r, value) => {
-      const amount = Math.abs(value);
+      const was = before?.values[i];
+      now[i++] = value;
+      const amount =
+        CREDIT_HELD * Math.abs(value) +
+        (was === undefined ? 0 : CREDIT_MOVED * Math.abs(value - was));
       if (amount < 1e-4) return;
       const area = destArea(r.dest, roleOf);
       if (r.source.startsWith('s:')) {
@@ -1719,8 +1747,11 @@ export class Engine {
     // What the dials do on their own: note density, chords, the mode, the room.
     for (const m of MACROS) {
       const far = Math.abs(macros[m] - MACRO_INFO[m].fallback) * 2;
-      viaDial(m, CREDIT_DIAL * far, domainOf(MACRO_AREA[m]));
+      const was = before?.macros[m];
+      const moved = was === undefined ? 0 : Math.abs(macros[m] - was);
+      viaDial(m, CREDIT_DIAL * (CREDIT_HELD * far + CREDIT_MOVED * moved), domainOf(MACRO_AREA[m]));
     }
+    this.creditBefore = { matrix, values: now, macros: { ...macros } };
     rec.step();
   }
 
@@ -1743,6 +1774,12 @@ export class Engine {
     return out;
   }
 
+  /** Every link's value on the step before, to tell what moved from what was held. */
+  private creditBefore: {
+    matrix: ModMatrix | undefined;
+    values: number[];
+    macros: Partial<Macros>;
+  } = { matrix: undefined, values: [], macros: {} };
   private drivers = new Map<MacroId, { id: string; share: number }[]>();
   private driversFor: unknown;
 
@@ -1996,13 +2033,22 @@ export class Engine {
 
   /** An accent or a fill goes to the sensors whose events asked for it. */
   private creditTrigger(trigger: 'accent' | 'fill', stepInBar: number): void {
-    const rec = this.recorder;
-    if (!rec) return;
     for (const r of this.router.getRoutes().triggers) {
       if (r.trigger !== trigger || !this.freshOnsets.has(r.channelId)) continue;
-      rec.mark(r.channelId, trigger, trigger === 'fill' ? 'Fill' : 'Accent', stepInBar / 4);
-      rec.credit(r.channelId, 'rhythm', trigger === 'fill' ? CREDIT_FILL : CREDIT_ACCENT);
+      this.tell(r.channelId, trigger, trigger === 'fill' ? 'Fill' : 'Accent', stepInBar / 4);
+      this.recorder?.credit(
+        r.channelId,
+        'rhythm',
+        trigger === 'fill' ? CREDIT_FILL : CREDIT_ACCENT,
+      );
     }
+  }
+
+  /** A sensor did something: the screen says so now, and the piece's record keeps it. */
+  private tell(channelId: string, what: SensorMark['what'], text: string, beat = 0): void {
+    const sensor = this.hub.get(channelId)?.desc.label ?? channelId;
+    this.news.push({ channelId, sensor, what, text });
+    this.recorder?.mark(channelId, what, text, beat);
   }
 
   /** Effects fired by sensor events: onsets, or the lid closing fast. */
@@ -2043,9 +2089,9 @@ export class Engine {
       this.fxQueue = this.fxQueue.filter((q) => q.fx !== c.fx);
       this.fxCooldown.set(c.fx, step + c.steps + info.rest);
       if (info.exclusive) this.fxBusyUntil = step + c.steps;
-      if (c.by && this.recorder) {
-        this.recorder.mark(c.by, 'fx', info.label, (step % STEPS_PER_BAR) / 4);
-        this.recorder.credit(c.by, 'space', CREDIT_FX_STEP * c.steps);
+      if (c.by) {
+        this.tell(c.by, 'fx', info.label, (step % STEPS_PER_BAR) / 4);
+        this.recorder?.credit(c.by, 'space', CREDIT_FX_STEP * c.steps);
       }
       return {
         part: 'fx',

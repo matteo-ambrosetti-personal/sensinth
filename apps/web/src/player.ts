@@ -1,7 +1,11 @@
 import { LookaheadScheduler, Renderer, type BusId } from '@sensinth/audio';
 import {
   Engine,
+  STEPS_PER_BAR,
+  STYLES,
   SensorHub,
+  chooseStyle,
+  type PieceLog,
   type DeterministicOptions,
   type EngineSnapshot,
   type EngineView,
@@ -9,6 +13,7 @@ import {
   type NoteEvent,
   type Style,
 } from '@sensinth/core';
+import { Tape, type PieceRecord } from './pieces';
 import { BackgroundPlayback } from './playback';
 import { nowSeconds } from './sensors/source';
 import { ScreenWakeLock } from './wakeLock';
@@ -20,6 +25,19 @@ export type SongSettings = Required<
     'seed' | 'loopBars' | 'repeat' | 'sensors' | 'instruments' | 'mapping' | 'evolve'
   >
 >;
+
+/**
+ * The playlist: whole pieces of three to five minutes, one after another,
+ * each from scratch. `styles` says who picks each piece's style and tempo.
+ */
+export interface PlaylistSettings {
+  styles: 'keep' | 'sensors';
+  /** Shortest and longest piece in seconds (default 180 to 300); tests play shorter ones. */
+  seconds?: [number, number];
+}
+
+/** A piece shorter than this that was stopped is not worth keeping. */
+const MIN_KEEP_SECONDS = 20;
 
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
 const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
@@ -74,6 +92,23 @@ export class Player {
    * first step: deterministic mode rewinds replays to it.
    */
   beforeStart: (origin: number) => void = () => {};
+  /** The playlist's settings, or undefined for one endless piece. */
+  private playlist: PlaylistSettings | undefined;
+  /** Pieces started since Play, and the chain of readings the last one ended on. */
+  private pieceCount = 0;
+  private chain = 0;
+  /** Steps and seconds of the piece playing, and when it began. */
+  private pieceSteps = 0;
+  private pieceSeconds = 0;
+  private pieceBegan = 0;
+  private stopTape: (() => Promise<Blob | undefined>) | undefined;
+  private tape: Tape | undefined;
+  /** A style picked while a piece plays: the next piece takes it, from the next bar. */
+  private nextStyle: Style | undefined;
+  /** A piece has ended (or was stopped) and is ready to keep. */
+  onPieceDone: (piece: PieceRecord) => void = () => {};
+  /** A new piece begins, with the style and tempo it plays in. */
+  onPieceStart: (info: { number: number; style: Style; bpm: number }) => void = () => {};
 
   constructor(style: Style, bpm: number) {
     this.style = style;
@@ -160,6 +195,31 @@ export class Player {
     return this.seeded;
   }
 
+  /** Turns the playlist on with its settings, or off; takes effect at the next Play or piece. */
+  setPlaylist(settings: PlaylistSettings | undefined): void {
+    this.playlist = settings ? { ...settings } : undefined;
+  }
+
+  /** True while pieces with a form play (not in deterministic mode). */
+  get playingPieces(): boolean {
+    return this.playing && this.engine.seed === undefined && this.playlist !== undefined;
+  }
+
+  /** Whether this browser can record the pieces it plays. */
+  get canRecord(): boolean {
+    return this.tape?.available ?? false;
+  }
+
+  /** The record of the piece playing so far. */
+  pieceLog(): PieceLog | undefined {
+    return this.playing ? this.engine.pieceLog() : undefined;
+  }
+
+  /** Ends the piece playing at the next bar line and starts the next one. */
+  skipPiece(): void {
+    if (this.playingPieces) this.nextStyle ??= this.style;
+  }
+
   /** Must be called from a user gesture (browsers block audio otherwise). */
   async start(): Promise<void> {
     if (this.playing) return;
@@ -221,6 +281,9 @@ export class Player {
     const origin = nowSeconds() + START_DELAY;
     if (this.seeded) this.beforeStart(origin);
     this.engine.dispose();
+    this.pieceCount = 0;
+    this.chain = 0;
+    this.nextStyle = undefined;
     this.engine = this.newEngine(this.seeded ? origin : undefined);
     this.views = [];
     this.current = undefined;
@@ -235,6 +298,8 @@ export class Player {
     renderer.setTempo(this.bpm);
     for (const slot of this.muted.keys()) renderer.setMuted(slot, true);
     this.renderer = renderer;
+    this.tape = new Tape(ctx, out);
+    this.beginPiece();
 
     let version = -1;
     const scheduler = new LookaheadScheduler(ctx);
@@ -243,7 +308,18 @@ export class Player {
       if (document.visibilityState !== 'hidden') this.hub.markStale(nowSeconds());
       // The page stalled and the clock jumped: the music's own clock jumps with it.
       if (skipped > 0) this.engine.skip(skipped, stepSeconds);
+      // The piece is over, or another style was picked: the next piece starts from scratch.
+      const turn = this.pieceSteps % STEPS_PER_BAR === 0 && this.nextStyle !== undefined;
+      if (this.playlist && this.engine.seed === undefined && (this.engine.ended || turn)) {
+        this.endPiece(Math.max(0, time - ctx.currentTime));
+        this.startNextPiece(renderer);
+        version = -1;
+      }
       const events = this.engine.tick(stepSeconds);
+      if (!this.engine.isWaiting) {
+        this.pieceSteps++;
+        this.pieceSeconds += stepSeconds;
+      }
       // The engine changes style on a bar line; follow it there.
       if (this.engine.currentStyle !== this.style) {
         this.style = this.engine.currentStyle;
@@ -277,6 +353,8 @@ export class Player {
 
   /** Stops the sound and the clock, keeping the screen and background locks. */
   private halt(): void {
+    if (this.scheduler) this.endPiece(0);
+    this.tape = undefined;
     this.scheduler?.stop();
     this.scheduler = undefined;
     // A deterministic engine keeps a log of the sensors: let it go.
@@ -330,7 +408,9 @@ export class Player {
   }
 
   setStyle(style: Style): void {
-    if (this.playing) this.engine.setStyle(style);
+    // In the playlist a style belongs to a whole piece: the next one takes it, from the next bar.
+    if (this.playingPieces) this.nextStyle = style;
+    else if (this.playing) this.engine.setStyle(style);
     else {
       this.style = style;
       this.engine.dispose();
@@ -346,11 +426,87 @@ export class Player {
     const engine = new Engine({
       style: this.style,
       hub: this.hub,
+      // Each piece follows from the readings that shaped the one before.
+      seed: this.chain,
       ...(keyRoot !== undefined ? { keyRoot } : {}),
       ...(seeded && origin !== undefined ? { deterministic: { ...seeded, origin } } : {}),
+      ...(!seeded && this.playlist
+        ? {
+            form: {
+              piece: this.pieceCount,
+              ...(this.playlist.seconds
+                ? { minSeconds: this.playlist.seconds[0], maxSeconds: this.playlist.seconds[1] }
+                : {}),
+            },
+          }
+        : {}),
     });
     engine.router.setSolo(this.soloId);
     return engine;
+  }
+
+  /** A piece begins: its clock and its tape start. */
+  private beginPiece(): void {
+    this.pieceSteps = 0;
+    this.pieceSeconds = 0;
+    this.pieceBegan = Date.now();
+    this.stopTape = undefined;
+    if (this.playlist && this.engine.seed === undefined) {
+      this.stopTape = this.tape?.start();
+      this.onPieceStart({ number: this.pieceCount + 1, style: this.style, bpm: this.bpm });
+    }
+  }
+
+  /**
+   * The piece is over (or was stopped): its record and its recording go to
+   * whoever keeps them. `ahead` is how far the clock runs ahead of the sound.
+   */
+  private endPiece(ahead: number): void {
+    const stop = this.stopTape;
+    this.stopTape = undefined;
+    const log = this.engine.pieceLog();
+    if (!stop || !log) return;
+    const seconds = this.pieceSeconds;
+    const piece: Omit<PieceRecord, 'audio'> = {
+      id: this.pieceBegan,
+      number: this.pieceCount + 1,
+      styleId: log.styleId,
+      styleName: log.styleName,
+      key: log.key,
+      bpm: this.bpm,
+      seconds,
+      complete: log.complete,
+      log,
+    };
+    const keep = log.complete || seconds >= MIN_KEEP_SECONDS;
+    // Let what is already scheduled sound before the tape stops.
+    setTimeout(
+      () =>
+        void stop().then((audio) => {
+          if (keep) this.onPieceDone({ ...piece, ...(audio ? { audio } : {}) });
+        }),
+      Math.round(ahead * 1000) + 250,
+    );
+  }
+
+  /** The next piece of the playlist: a new engine, from scratch, in the style it is given or picks. */
+  private startNextPiece(renderer: Renderer): void {
+    const macros = this.engine.router.macros;
+    this.chain = this.engine.chainSeed;
+    this.pieceCount++;
+    const picked = this.nextStyle;
+    this.nextStyle = undefined;
+    if (picked) this.style = picked;
+    else if (this.playlist?.styles === 'sensors') {
+      this.style = chooseStyle(STYLES, macros.energy, this.chain, this.style.id);
+      // The tempo with it: the style's own, a little faster or slower as the readings have it.
+      const lean = ((this.chain >>> 8) % 1000) / 1000;
+      this.setTempo(Math.round(this.style.defaultTempo * (0.94 + 0.12 * lean)));
+    }
+    this.engine.dispose();
+    this.engine = this.newEngine();
+    renderer.setStyle(this.style);
+    this.beginPiece();
   }
 
   private noteHits(events: readonly NoteEvent[], secondsAhead: number): void {

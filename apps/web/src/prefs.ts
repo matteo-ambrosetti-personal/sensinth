@@ -18,6 +18,10 @@ export interface Prefs {
   evolve?: boolean;
   /** Your own effect and repeat per input, by row id. */
   inputMap?: InputMap;
+  /** The playlist: whole pieces one after another (default on). */
+  playlist?: boolean;
+  /** Who picks each piece's style: you, or the sensors. */
+  playlistStyles?: 'keep' | 'sensors';
 }
 
 const KEY = 'sensinth.prefs.v1';

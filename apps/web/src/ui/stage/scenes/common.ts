@@ -27,7 +27,7 @@ export function agingSky(
 
 /** A figure's look, greyed out while nobody plays its part. */
 export function dim(look: Look, a: ActorState, playing: boolean): Look {
-  if (a.on || !playing) return look;
+  if ((a.on && !a.resting) || !playing) return look;
   const grey = (c: string) => mix(c, '#30324a', 0.65);
   return {
     ...look,
@@ -41,12 +41,12 @@ export function dim(look: Look, a: ActorState, playing: boolean): Look {
 
 /** A colour greyed out while nobody plays its part. */
 export function tint(color: string, a: ActorState, playing: boolean): string {
-  return a.on || !playing ? color : mix(color, '#30324a', 0.65);
+  return (a.on && !a.resting) || !playing ? color : mix(color, '#30324a', 0.65);
 }
 
 /** Eyes closed for a figure with nothing to play. */
 export function asleep(a: ActorState, playing: boolean): boolean {
-  return playing && (!a.on || a.muted);
+  return playing && (!a.on || a.muted || a.resting);
 }
 
 /** A gentle idle sway, so nobody stands frozen. */

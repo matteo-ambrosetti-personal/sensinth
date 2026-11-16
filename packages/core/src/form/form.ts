@@ -418,3 +418,28 @@ export function sectionLabel(kind: SectionKind, nth: number, featured?: string):
   const name = SECTION_INFO[kind].label + (nth > 0 ? ` ${nth + 1}` : '');
   return kind === 'solo' && featured ? `${name}: ${featured}` : name;
 }
+
+/**
+ * The style of the next piece, picked by the sensors: busy sensors go for
+ * the faster styles, calm ones for the slower, and the chain of readings
+ * picks among the nearest few. Never the style just played, when there is
+ * another.
+ */
+export function chooseStyle<T extends { id: string; defaultTempo: number }>(
+  styles: readonly T[],
+  energy: number,
+  chain: number,
+  current?: string,
+): T {
+  const pool = styles.filter((s) => s.id !== current);
+  const from = (pool.length > 0 ? pool : [...styles]).sort(
+    (a, b) => a.defaultTempo - b.defaultTempo || (a.id < b.id ? -1 : 1),
+  );
+  if (from.length === 0) throw new Error('chooseStyle: no styles');
+  const centre = Math.min(1, Math.max(0, energy)) * (from.length - 1);
+  const near = from
+    .map((s, i) => ({ s, d: Math.abs(i - centre) }))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, Math.min(4, from.length));
+  return (near[(chain >>> 0) % near.length] as { s: T }).s;
+}

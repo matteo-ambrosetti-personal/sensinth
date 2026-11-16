@@ -57,6 +57,18 @@
           <canvas id="stage" class="stage" role="img" aria-label="The band, stopped"></canvas>
           <div id="banner" class="banner" aria-live="polite" hidden></div>
         </div>
+        <div id="form" class="form" hidden>
+          <div
+            id="form-bar"
+            class="form-bar"
+            role="img"
+            aria-label="The sections of this piece"
+          ></div>
+          <div class="form-foot">
+            <p id="form-text" class="form-text" aria-live="polite"></p>
+            <button id="next-piece" class="pill-btn" type="button">Next piece</button>
+          </div>
+        </div>
         <canvas id="scope" class="scope" aria-hidden="true"></canvas>
         <div class="tempo" role="group" aria-labelledby="tempo-title">
           <h2 id="tempo-title" class="visually-hidden">Tempo</h2>
@@ -101,6 +113,21 @@
         </dl>
       </section>
 
+      <section class="panel play-only does-panel" aria-labelledby="does-title">
+        <h2 id="does-title">
+          What each sensor does <span class="h2-note">right now, in this piece</span>
+        </h2>
+        <ul id="does" class="does"></ul>
+        <p id="does-empty" class="empty">
+          Turn on a sensor source below. Every note comes from the sensors: no sensor, no music.
+        </p>
+        <p class="note">
+          The bar beside each line fills while that link is at work. Each sensor also seeds the
+          patterns, the instruments, the key and the length of every piece through a hash of its
+          readings, and the dials it sets choose which section comes next.
+        </p>
+      </section>
+
       <section class="panel play-only" aria-labelledby="tracks-title">
         <h2 id="tracks-title">
           Tracks <span id="tracks-note" class="h2-note">written by the sensors</span>
@@ -119,6 +146,21 @@
         </ul>
         <ol id="tracks" class="tracks"></ol>
         <p id="tracks-empty" class="empty">Press play to see each track.</p>
+      </section>
+
+      <section class="panel play-only pieces-panel" aria-labelledby="pieces-title">
+        <div class="panel-head">
+          <h2 id="pieces-title">
+            Last pieces <span class="h2-note">the latest three, kept on this device</span>
+          </h2>
+          <span id="pieces-status" class="badge">–</span>
+        </div>
+        <ol id="pieces" class="pieces"></ol>
+        <p id="pieces-empty" class="empty">
+          Nothing yet. With the playlist on, each piece is recorded as it plays and kept here when
+          it ends, with a diagram of what every sensor did in it. A fourth piece replaces the
+          oldest.
+        </p>
       </section>
 
       <!-- Where the music is going, and who is steering it. -->
@@ -151,6 +193,27 @@
 
       <div class="columns play-only">
         <div class="column">
+          <section class="panel play-only playlist-panel" aria-labelledby="playlist-title">
+            <div class="panel-head">
+              <h2 id="playlist-title">Playlist</h2>
+              <label class="switch">
+                <input id="playlist-on" type="checkbox" checked />
+                <span class="switch-track" aria-hidden="true"></span>
+                Whole pieces
+              </label>
+            </div>
+            <div class="seeded">
+              <label class="seed-field">
+                Each piece's style
+                <select id="playlist-styles">
+                  <option value="keep">Mine (the one I pick)</option>
+                  <option value="sensors">The sensors pick it, and the tempo</option>
+                </select>
+              </label>
+            </div>
+            <p id="playlist-desc" class="style-desc"></p>
+          </section>
+
           <section class="panel play-only song-mode" aria-labelledby="det-title">
             <div class="panel-head">
               <h2 id="det-title">Song mode</h2>
