@@ -42,7 +42,10 @@ const MIN_KEEP_SECONDS = 20;
 /** Seconds after one of our own drum hits during which mic onsets are ignored. */
 const SELF_HIT_WINDOW: [number, number] = [-0.05, 0.3];
 /** Views kept for steps scheduled ahead of the audio clock. */
-const MAX_QUEUED_VIEWS = 32;
+const MAX_QUEUED_VIEWS = 48;
+/** Seconds of music scheduled ahead: little while you watch, more behind other windows. */
+const LOOKAHEAD = 0.12;
+const LOOKAHEAD_HIDDEN = 0.45;
 /** Seconds from pressing Play to the first step. */
 const START_DELAY = 0.08;
 
@@ -115,6 +118,12 @@ export class Player {
     this.bpm = bpm;
     this.engine = this.newEngine();
     this.hub.onsetGate = (id, t) => this.allowOnset(id, t);
+    // Behind other windows the page is woken less evenly: schedule further ahead there.
+    document.addEventListener('visibilitychange', () =>
+      this.scheduler?.setLookahead(
+        document.visibilityState === 'hidden' ? LOOKAHEAD_HIDDEN : LOOKAHEAD,
+      ),
+    );
   }
 
   get playing(): boolean {
@@ -348,6 +357,7 @@ export class Player {
       this.noteHits(events, time - ctx.currentTime);
     };
     this.scheduler = scheduler;
+    scheduler.setLookahead(document.visibilityState === 'hidden' ? LOOKAHEAD_HIDDEN : LOOKAHEAD);
     scheduler.start(this.bpm, START_DELAY);
   }
 

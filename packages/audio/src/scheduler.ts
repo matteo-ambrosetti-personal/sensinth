@@ -8,6 +8,43 @@ export interface SchedulerOptions {
 }
 
 /**
+ * Calls `fn` every `ms` milliseconds; the function returned stops it. The
+ * ticks come from a worker where there are workers: a page's own timers
+ * slow to one a second (or less) once its tab is in the background, a
+ * worker's do not, and the music has to keep time behind other windows.
+ */
+function ticker(ms: number, fn: () => void): () => void {
+  let fallback: ReturnType<typeof setInterval> | undefined;
+  const plain = () => (fallback ??= setInterval(fn, ms));
+  if (typeof Worker === 'undefined' || typeof Blob === 'undefined') {
+    plain();
+    return () => clearInterval(fallback);
+  }
+  let worker: Worker | undefined;
+  let url: string | undefined;
+  try {
+    url = URL.createObjectURL(
+      new Blob([`setInterval(() => postMessage(0), ${ms});`], { type: 'text/javascript' }),
+    );
+    worker = new Worker(url);
+    worker.onmessage = fn;
+    // A page that may not start workers (a strict content policy) keeps time by itself.
+    worker.onerror = () => {
+      worker?.terminate();
+      worker = undefined;
+      plain();
+    };
+  } catch {
+    plain();
+  }
+  return () => {
+    worker?.terminate();
+    if (url) URL.revokeObjectURL(url);
+    if (fallback !== undefined) clearInterval(fallback);
+  };
+}
+
+/**
  * Lookahead scheduler ("a tale of two clocks"): a coarse JS timer wakes up
  * often and schedules every step that falls within the next `lookahead`
  * seconds on the precise audio clock.
@@ -23,8 +60,8 @@ export class LookaheadScheduler {
   /** Steps jumped over and not yet reported. */
   private skipped = 0;
   private stepSeconds = stepDuration(120);
-  private timer: ReturnType<typeof setInterval> | undefined;
-  private readonly lookahead: number;
+  private timer: (() => void) | undefined;
+  private lookahead: number;
   private readonly interval: number;
 
   constructor(
@@ -45,8 +82,16 @@ export class LookaheadScheduler {
     this.step = 0;
     this.skipped = 0;
     this.nextTime = this.clock.currentTime + delay;
-    this.timer = setInterval(() => this.pump(), this.interval);
+    this.timer = ticker(this.interval, () => this.pump());
     this.pump();
+  }
+
+  /**
+   * Seconds of audio scheduled ahead. More is safer where the page is woken
+   * less often (in the background), at the price of answering later.
+   */
+  setLookahead(seconds: number): void {
+    this.lookahead = Math.max(0.05, seconds);
   }
 
   /** Takes effect from the next unscheduled step. */
@@ -55,7 +100,7 @@ export class LookaheadScheduler {
   }
 
   stop(): void {
-    if (this.timer !== undefined) clearInterval(this.timer);
+    this.timer?.();
     this.timer = undefined;
   }
 

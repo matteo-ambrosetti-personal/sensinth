@@ -174,6 +174,33 @@ not what was wanted, and 3.10 replaces it.
   instrument, mouse clicks counted as hard presses, menus that swallowed keys, Flow's stale LFO
   rows.
 
+## Phase 3.13: whole pieces, a playlist, and a mix to listen to for hours (done)
+
+Made to be left on while working.
+
+- **A piece has a form.** With the playlist on, a piece lasts three to five minutes: an intro
+  that brings the band in, the riff, then voice, solo and break sections, an outro and a last
+  chord. The sensors' dials choose each next section (busy sensors the riff, bright ones the
+  voice, restless ones a solo, calm ones a break); the riff and the voice come back to their
+  themes; a new scene waits for the phrase and cuts to a section of another kind.
+- **The playlist.** After the last chord a new piece starts from scratch, seeded by the chain
+  of readings the last one ended on: in your style, or in a style and at a tempo the sensors
+  pick.
+- **The last three pieces are kept**, each with its recording and a diagram of what every sensor
+  did in it, bar by bar. A fourth replaces the oldest.
+- **What each sensor does**, in words, with a bar that fills while each link is at work.
+- **The mix.** Each kind of track has its place (the basses played 8 to 10 dB over the chords
+  and the leads), the low end is leaner, reverb and delay stay out of it, the delay is a
+  ping-pong, pads and detuned pairs are spread, and every style plays about as loud (within
+  2.3 dB over 32 bars of each; it was 9 dB).
+- **The clock ticks from a worker**, so the music keeps time in a background tab.
+- **The screen.** Every piece has its own palette, weather, hour and passing visitor; a section's
+  name comes up with the sensor that chose it; a light falls on whoever is put forward and
+  resting players sit out; what a sensor just did is written out; each live sensor has a meter.
+
+**Not done:** the Android app cannot save a file from the page (the recording plays inside the
+app; _Record sensors_ has the same limit). The Mac app saves to Downloads.
+
 ## Phase 4: Pico sensor node
 
 The SensorLink protocol (`docs/sensorlink-protocol.md`) and MicroPython firmware for the Pico W /
