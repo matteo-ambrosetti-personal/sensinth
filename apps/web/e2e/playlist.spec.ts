@@ -84,10 +84,11 @@ test('the shelf keeps the latest three pieces', async ({ page }) => {
     await page.locator('#next-piece').click();
     await expect(page.locator('#form-text')).toContainText(`Piece ${i}`, { timeout: 15_000 });
   }
-  await expect(page.locator('#pieces .piece')).toHaveCount(3, { timeout: 10_000 });
-  const titles = await page.locator('#pieces .piece-title').allTextContents();
-  expect(titles[0]).toContain('Piece 4');
-  expect(titles[2]).toContain('Piece 2');
+  // The fourth piece is kept a moment after it ends: wait for it, then count.
+  const titles = page.locator('#pieces .piece-title');
+  await expect(titles.first()).toContainText('Piece 4', { timeout: 15_000 });
+  await expect(page.locator('#pieces .piece')).toHaveCount(3);
+  await expect(titles.nth(2)).toContainText('Piece 2');
 });
 
 test('with the playlist off the piece never ends and nothing is recorded', async ({ page }) => {
