@@ -170,6 +170,7 @@ export const dnb: Style = {
     effects: ['stutter', 'brake', 'tapeStop', 'sweep', 'dive', 'crush', 'gate', 'ring', 'dubThrow'],
   },
   fx: {
+    trimDb: 0.5,
     reverb: [0.08, 0.3],
     reverbSeconds: 3.2,
     delay: [0.05, 0.25],

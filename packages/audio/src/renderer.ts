@@ -14,6 +14,7 @@ import {
   type NoteEvent,
   type Style,
   type TrackParams,
+  type TrackRole,
 } from '@sensinth/core';
 import { PerformanceFx, type FxPlaying } from './fx/performance';
 import { createImpulse, createSoftClipCurve } from './fx/reverb';
@@ -80,8 +81,35 @@ const DEFAULT_REVERB_SECONDS = 2.4;
 const GLIDE = 0.025;
 /** Most a track's drive pushes into the shaper. */
 const MAX_DRIVE = 8;
-/** Delay feedback when no dub throw is playing. */
-const FEEDBACK = 0.35;
+/** Delay feedback (around both echoes of the ping-pong) when no dub throw is playing. */
+const FEEDBACK = 0.4;
+/** What the second echo of the ping-pong keeps of the first. */
+const PONG = 0.7;
+/** Below this the mix is rumble no speaker plays and every compressor hears. */
+const RUMBLE_HZ = 42;
+/** The returns stay out of the low end, where reverb and echoes turn to mud. */
+const RETURN_HP_HZ = 220;
+/**
+ * Where each kind of track sits in the mix, as a gain on its patch. Measured
+ * one track at a time, the basses played 8 to 10 dB over the chords and the
+ * leads and 20 dB over the hats: they come down, and the parts that carry
+ * the tune and the detail come up.
+ */
+const ROLE_MIX: Partial<Record<TrackRole, number>> = {
+  bass: 0.5,
+  drone: 0.7,
+  lead: 1.35,
+  chords: 1.25,
+  arp: 1.2,
+};
+const KICK_MIX = 0.75;
+const DRUM_MIX = 1.25;
+
+function mixOf(machine: Machine): number {
+  if (machine.patch.type === 'drum') return machine.patch.voice === 'kick' ? KICK_MIX : DRUM_MIX;
+  return ROLE_MIX[machine.role] ?? 1;
+}
+
 /** The FX lane's slot; muting it silences the triggered effects. */
 const FX_SLOT = 'fx';
 
@@ -111,11 +139,16 @@ export class Renderer {
   private readonly reverbBus: GainNode;
   private readonly delayBus: GainNode;
   private readonly delay: DelayNode;
+  private readonly delayPong: DelayNode;
   private readonly feedback: GainNode;
+  /** The style's own level, so every style plays about as loud. */
+  private readonly trim: GainNode;
   /** Into the reverb at full level, for the wash. */
   private readonly washIn: GainNode;
   private readonly perf: PerformanceFx;
   private readonly reverbReturn: GainNode;
+  /** A high-pass in front of the reverb. */
+  private readonly reverbIn: BiquadFilterNode;
   private readonly buses: Record<BusId, AnalyserNode>;
   private readonly filter: BiquadFilterNode;
   private readonly driveCurve: Float32Array<ArrayBuffer>;
@@ -142,12 +175,32 @@ export class Renderer {
     this.filter = ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
     this.filter.Q.value = 0.5;
+    // Glue rather than squash: a slow, gentle compressor that the kick does not pump.
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -12;
-    comp.knee.value = 6;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.005;
-    comp.release.value = 0.15;
+    comp.threshold.value = -16;
+    comp.knee.value = 12;
+    comp.ratio.value = 2.5;
+    comp.attack.value = 0.02;
+    comp.release.value = 0.25;
+    const rumble = ctx.createBiquadFilter();
+    rumble.type = 'highpass';
+    rumble.frequency.value = RUMBLE_HZ;
+    rumble.Q.value = 0.54;
+    // A second stage: together a fourth-order filter, steep enough to keep the kicks' tails out.
+    const rumble2 = ctx.createBiquadFilter();
+    rumble2.type = 'highpass';
+    rumble2.frequency.value = RUMBLE_HZ;
+    rumble2.Q.value = 1.31;
+    // The low end a little leaner, the top a little more open: easier to listen to for long.
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowshelf';
+    low.frequency.value = 110;
+    low.gain.value = -3;
+    const air = ctx.createBiquadFilter();
+    air.type = 'highshelf';
+    air.frequency.value = 5000;
+    air.gain.value = 2.5;
+    this.trim = ctx.createGain();
     const clip = ctx.createWaveShaper();
     clip.curve = createSoftClipCurve();
     clip.oversample = '2x';
@@ -164,20 +217,38 @@ export class Renderer {
     this.convolver.buffer = createImpulse(ctx, this.reverbSeconds);
     this.reverbReturn = ctx.createGain();
     this.reverbReturn.connect(this.dryBus);
-    this.reverbBus.connect(this.convolver).connect(this.reverbReturn);
-    this.washIn.connect(this.convolver);
+    this.reverbIn = ctx.createBiquadFilter();
+    this.reverbIn.type = 'highpass';
+    this.reverbIn.frequency.value = RETURN_HP_HZ;
+    this.reverbBus.connect(this.reverbIn);
+    this.washIn.connect(this.reverbIn);
+    this.reverbIn.connect(this.convolver).connect(this.reverbReturn);
 
     // Tempo-synced feedback delay, darkened on every repeat.
     this.delayBus = ctx.createGain();
     this.delay = ctx.createDelay(2);
     this.feedback = ctx.createGain();
     this.feedback.gain.value = FEEDBACK;
+    // A ping-pong: the first echo to one side, the second to the other, round again.
     const damp = ctx.createBiquadFilter();
     damp.type = 'lowpass';
     damp.frequency.value = 3500;
-    this.delayBus.connect(this.delay);
-    this.delay.connect(damp).connect(this.feedback).connect(this.delay);
-    damp.connect(this.dryBus);
+    const thin = ctx.createBiquadFilter();
+    thin.type = 'highpass';
+    thin.frequency.value = RETURN_HP_HZ;
+    this.delayPong = ctx.createDelay(2);
+    const pong = ctx.createGain();
+    pong.gain.value = PONG;
+    const left = ctx.createStereoPanner();
+    left.pan.value = -0.55;
+    const right = ctx.createStereoPanner();
+    right.pan.value = 0.55;
+    this.delayBus.connect(thin).connect(this.delay);
+    this.delay.connect(damp);
+    damp.connect(left).connect(this.dryBus);
+    damp.connect(pong).connect(this.delayPong);
+    this.delayPong.connect(right).connect(this.dryBus);
+    this.delayPong.connect(this.feedback).connect(this.delay);
 
     // Triggered effects on the whole mix, before the master filter.
     this.perf = new PerformanceFx(ctx, {
@@ -189,7 +260,16 @@ export class Renderer {
       noise: this.noise,
     });
     this.dryBus.connect(this.perf.input);
-    this.perf.output.connect(this.filter).connect(comp).connect(clip).connect(this.output);
+    this.perf.output
+      .connect(this.filter)
+      .connect(rumble)
+      .connect(rumble2)
+      .connect(low)
+      .connect(air)
+      .connect(this.trim)
+      .connect(comp)
+      .connect(clip)
+      .connect(this.output);
 
     const analyser = (from: AudioNode) => {
       const a = ctx.createAnalyser();
@@ -242,6 +322,7 @@ export class Renderer {
   /** Switches effects (reverb tail, delay time, crackle, wobble, …) without touching the tracks. */
   setFx(fx: FxConfig): void {
     this.fx = fx;
+    this.trim.gain.setTargetAtTime(Math.pow(10, (fx.trimDb ?? 0) / 20), this.ctx.currentTime, 0.3);
     this.setReverbLength(fx.reverbSeconds ?? DEFAULT_REVERB_SECONDS);
     this.setTempo(60 / (this.stepSeconds * 4));
   }
@@ -265,7 +346,12 @@ export class Renderer {
     const t = this.ctx.currentTime;
     for (const chain of this.tracks.values()) {
       chain.level.gain.setTargetAtTime(0, t + 0.05, 0.15);
-      if ('close' in this.ctx) setTimeout(() => chain.pan.disconnect(), 2500);
+      if ('close' in this.ctx) {
+        setTimeout(() => {
+          chain.instrument.output.disconnect();
+          chain.pan.disconnect();
+        }, 2500);
+      }
     }
     this.tracks = next;
   }
@@ -300,11 +386,9 @@ export class Renderer {
 
   setTempo(bpm: number): void {
     this.stepSeconds = stepDuration(bpm);
-    this.delay.delayTime.setTargetAtTime(
-      Math.min(1.9, this.fx.delaySteps * this.stepSeconds),
-      this.ctx.currentTime,
-      0.05,
-    );
+    const time = Math.min(1.9, this.fx.delaySteps * this.stepSeconds);
+    this.delay.delayTime.setTargetAtTime(time, this.ctx.currentTime, 0.05);
+    this.delayPong.delayTime.setTargetAtTime(time, this.ctx.currentTime, 0.05);
   }
 
   /** Follows the engine: master filter, sends, wobble, crackle and every track's params. */
@@ -426,7 +510,7 @@ export class Renderer {
       reverb,
       delay,
       analyser,
-      patchGain: m.machine.patch.gain,
+      patchGain: m.machine.patch.gain * mixOf(m.machine),
       filterRange: m.machine.filter,
       params: neutralParams(),
     };
@@ -463,11 +547,9 @@ export class Renderer {
     this.reverbSeconds = seconds;
     const next = this.ctx.createConvolver();
     next.buffer = createImpulse(this.ctx, seconds);
-    this.reverbBus.connect(next).connect(this.reverbReturn);
-    this.washIn.connect(next);
+    this.reverbIn.connect(next).connect(this.reverbReturn);
     const old = this.convolver;
-    this.reverbBus.disconnect(old);
-    this.washIn.disconnect(old);
+    this.reverbIn.disconnect(old);
     this.convolver = next;
     // Let the old tail ring out before dropping it.
     if ('close' in this.ctx) setTimeout(() => old.disconnect(), seconds * 1000);

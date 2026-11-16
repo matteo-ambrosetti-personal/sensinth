@@ -187,6 +187,7 @@ export const techno: Style = {
     effects: ['stutter', 'sweep', 'dive', 'dubThrow', 'gate', 'crush', 'ring', 'wash', 'tapeStop'],
   },
   fx: {
+    trimDb: 0.5,
     reverb: [0.05, 0.25],
     delay: [0.06, 0.35],
     delaySteps: 3,

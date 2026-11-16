@@ -307,6 +307,8 @@ export interface FxConfig {
   wobble?: [number, number];
   /** Random timing offset per note, in milliseconds, for a played-by-hand feel. */
   humanize?: number;
+  /** The style's own level in dB, so every style plays about as loud (default 0). */
+  trimDb?: number;
 }
 
 /**

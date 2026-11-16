@@ -153,6 +153,7 @@ export const synthwave: Style = {
     effects: ['sweep', 'wash', 'gate', 'dive', 'dubThrow', 'stutter', 'tapeStop'],
   },
   fx: {
+    trimDb: 3.5,
     reverb: [0.1, 0.35],
     reverbSeconds: 3.5,
     delay: [0.06, 0.3],

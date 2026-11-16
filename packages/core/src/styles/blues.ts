@@ -208,6 +208,7 @@ export const blues: Style = {
     effects: ['wash', 'dubThrow', 'dive', 'tapeStop', 'brake'],
   },
   fx: {
+    trimDb: 1.5,
     reverb: [0.08, 0.25],
     reverbSeconds: 2,
     delay: [0, 0.1],

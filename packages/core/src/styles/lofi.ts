@@ -220,6 +220,7 @@ export const lofi: Style = {
     effects: ['tapeStop', 'brake', 'wash', 'dubThrow', 'dive', 'crush'],
   },
   fx: {
+    trimDb: 4,
     reverb: [0.05, 0.25],
     delay: [0.02, 0.2],
     delaySteps: 3,

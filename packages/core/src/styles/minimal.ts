@@ -140,6 +140,7 @@ export const minimal: Style = {
     effects: ['gate', 'dubThrow', 'wash', 'sweep', 'dive'],
   },
   fx: {
+    trimDb: 4.5,
     reverb: [0.12, 0.35],
     reverbSeconds: 3,
     delay: [0, 0.1],
