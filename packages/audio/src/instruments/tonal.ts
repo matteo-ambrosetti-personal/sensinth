@@ -14,6 +14,9 @@ import { addVibrato, connectDetune, VoiceLimiter } from './voice';
 
 type TonalPatch = Extract<Patch, { type: 'pulse' | 'osc' }>;
 
+/** How far a detuned pair's voices sit to either side, as a pan. */
+const PAIR_WIDTH = 0.35;
+
 /**
  * Pulse and basic-oscillator voices with ADSR, optional detune and delayed
  * vibrato. `timbre` picks the pulse width or widens the detune. Optional:
@@ -97,7 +100,14 @@ export class TonalInstrument implements Instrument {
       osc.detune.setValueAtTime(cents, time);
       addVibrato(ctx, osc, patch.vibrato, time, gate, end);
       connectDetune(osc, this.detuneMod);
-      osc.connect(input);
+      if (spread.length > 1) {
+        // A detuned pair sits a little apart, one voice to each side.
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = cents < 0 ? -PAIR_WIDTH : PAIR_WIDTH;
+        osc.connect(panner).connect(input);
+      } else {
+        osc.connect(input);
+      }
       osc.start(time);
       osc.stop(end);
     }

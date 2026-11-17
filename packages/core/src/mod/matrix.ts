@@ -174,6 +174,11 @@ export class ModMatrix {
     this.refreshInternal();
   }
 
+  /** Calls `fn` with every route and what it added on the latest `evaluate`, without copying. */
+  eachContribution(fn: (route: Route, value: number) => void): void {
+    this.routes.forEach((r, i) => fn(r, this.contributions[i] ?? 0));
+  }
+
   view(): RouteView[] {
     return this.routes.map((r, i) => ({ ...r, value: this.contributions[i] ?? 0 }));
   }

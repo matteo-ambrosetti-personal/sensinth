@@ -9,13 +9,26 @@ It runs on an Android phone (as an app or in Chrome) and on a Mac (as an app or 
 music engine is plain TypeScript with no browser dependencies, so the same code can later run on a
 Raspberry Pi, with microcontrollers such as the Raspberry Pi Pico streaming extra sensors to it.
 
-**Status:** Phase 3.12. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
+**Status:** Phase 3.13. Ten styles (Chiptune, Ambient, Lo-fi, Hip-hop, Jazz, Blues, Techno / acid,
 Synthwave, Drum & bass and Reich-like Minimal) are sound palettes that the sensors compose in, and
 **Free** has no style at all: the sensors also pick the instruments, from every style. It plays
 like a Digitakt driven by your surroundings: tracks with their own lengths, trig conditions,
 parameter locks and LFOs, and a modulation matrix where sensors, LFOs and chaos maps move each
 other.
 
+- **It plays whole pieces, one after another.** With the **Playlist** on (it is, from the start)
+  a piece lasts three to five minutes and is complete: an intro that brings the band in, the
+  riff, then voice, solo and break sections, an outro and a last chord. The sensors choose each
+  next section: busy sensors bring the riff back, bright ones the voice, restless ones a solo,
+  calm ones a break. Then a new piece starts from scratch, in another key and with other
+  instruments; in your style, or in a style and at a tempo the sensors pick. Made to be left on
+  while you work.
+- **The last three pieces are kept.** Each is recorded as it plays and kept on the device with a
+  diagram of what every sensor did in it, bar by bar; a fourth replaces the oldest. Play them
+  again, or download the music and the diagram.
+- **You can read what each sensor does.** A row per sensor says in words what moving it does
+  right now ("Higher → Rhodes brighter", "A jolt → fires Stutter"), with a bar that fills while
+  that link is at work, and the screen writes out what a sensor just did.
 - **You can see the music.** The **screen** at the top is a little pixel scene per style, like a
   Pocket Operator's display: in Chiptune the hero jumps on the kick and coins spin on the hats; in
   Jazz a drummer, a bassist, a pianist and a sax player play their own tracks; in Techno the crowd
@@ -236,6 +249,34 @@ song when they cross a zone: choose _Sensors: off_ for a still loop. With severa
 sensor's own effect comes from its share of the music (see **Who drives what**).
 
 Details: [docs/architecture.md](docs/architecture.md).
+
+### Pieces and the playlist
+
+- **The form.** A piece opens with an **intro** (the tracks come in a stage at a time: from the
+  air down, from the beat up, or around the riff, as the sensors have it), states its **riff**,
+  and then moves between **riff** (the theme, the whole band), **voice** (a sung line of four
+  bars, said, repeated a step away, answered and brought home), **solo** (one instrument
+  improvises over a thinner band: the lead first, later others, even a drum) and **break** (the
+  drums and the bass step out, then a riser back in). An **outro** lets the tracks go and the
+  band lands on one last chord. The strip under the screen shows the sections so far, the one
+  playing, and which sensor chose it.
+- **It all comes from the sensors.** A hash of every reading writes the notes, the instruments,
+  the key and how long the piece is; the dials the sensors drive choose each next section; a
+  change in the surroundings (the light, the place, a sensor switched on) cuts to a new section
+  at the end of the phrase, in a new key. The same sensor recording plays the same piece.
+- **Themes come back.** The riff and the voice return to what they played before, moved on a
+  little; a new scene gives the piece a new voice.
+- **Next piece** (under the screen) ends the piece at the next bar. Picking another style does
+  the same: a style belongs to a whole piece.
+- **Last pieces** keeps the latest three with their recordings (WebM/Opus in Chrome and the
+  Android app, AAC in Safari and the Mac app) and their diagrams (SVG). In the diagram each
+  sensor has a row: bars for how much it moved the music in each bar, coloured by what it moved
+  (rhythm, harmony, sound, space, motion), a line for its own reading, and marks where it fired
+  an effect, changed the scene or chose a section; on the right, its share of the piece. A
+  sensor that holds still only sets a value and counts for little; one that moves counts for
+  much more. Pieces stopped before the end are kept too, if they lasted 20 seconds.
+- **Off**, the playlist gives the one endless piece of before, which drifts further and further;
+  nothing is recorded. Deterministic mode loops its song and has no form.
 
 ## Getting started
 

@@ -2696,3 +2696,219 @@ input[type='checkbox'] {
     display: none;
   }
 }
+
+/* The form of the piece playing ------------------------------------------- */
+.form {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 2px;
+}
+.form-bar {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+}
+.form-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 5px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: rgba(255, 179, 71, 0.07);
+  color: var(--muted);
+  font: 500 11px/20px var(--font-display, inherit);
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.form-cell[data-kind='riff'] {
+  --cell: var(--t2);
+}
+.form-cell[data-kind='voice'] {
+  --cell: var(--t3);
+}
+.form-cell[data-kind='solo'] {
+  --cell: var(--t1);
+}
+.form-cell[data-kind='break'] {
+  --cell: var(--t5);
+}
+.form-cell[data-kind] {
+  border-color: color-mix(in srgb, var(--cell, var(--ink)) 45%, transparent);
+  color: color-mix(in srgb, var(--cell, var(--ink)) 80%, var(--ink));
+}
+.form-cell.is-now {
+  background: color-mix(in srgb, var(--cell, var(--ink)) 78%, transparent);
+  color: #120c05;
+}
+.form-rest {
+  border-style: dashed;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.form-foot {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.form-text {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* What each sensor does ---------------------------------------------------- */
+.does {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fxrow {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+}
+.fxrow-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+.fxrow-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+.fxrow-value {
+  color: var(--muted);
+  font: 12px var(--font-mono, monospace);
+}
+.fxrow-head .meter {
+  grid-column: 1 / -1;
+}
+.fxrow-said {
+  grid-column: 1 / -1;
+  color: var(--accent, #ffb347);
+  font-size: 12px;
+  font-weight: 600;
+}
+.fxrow-list {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.fxrow-list li {
+  display: block;
+  padding-left: 30px;
+  position: relative;
+  transition: color 0.12s;
+}
+.fxrow-list li.is-on {
+  color: var(--ink);
+}
+.fxrow-list li[data-domain='rhythm'] {
+  --area: var(--a-rhythm);
+}
+.fxrow-list li[data-domain='harmony'] {
+  --area: var(--a-harmony);
+}
+.fxrow-list li[data-domain='sound'] {
+  --area: var(--a-sound);
+}
+.fxrow-list li[data-domain='space'] {
+  --area: var(--a-space);
+}
+.fxrow-list li[data-domain='motion'] {
+  --area: var(--a-motion);
+}
+.fx-live {
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 22px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 179, 71, 0.12);
+}
+.fx-live > span {
+  display: block;
+  height: 100%;
+  background: var(--area, var(--ink));
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.fx-when {
+  color: var(--area, var(--ink));
+}
+.fx-none {
+  padding-left: 0 !important;
+  font-style: italic;
+}
+
+/* Last pieces --------------------------------------------------------------- */
+.pieces {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.piece {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+}
+.piece-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+.piece-meta {
+  margin: 3px 0 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.piece-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.piece-actions audio {
+  flex: 1 1 260px;
+  max-width: 100%;
+  height: 34px;
+}
+.piece-none {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.piece-diagram {
+  margin-top: 8px;
+}
+.piece-diagram summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 13px;
+}
+.piece-diagram img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}

@@ -657,3 +657,155 @@ function padPattern(rng: Rng, n: number): (Trig | undefined)[] {
   }
   return trigs;
 }
+
+/** A line a section asks its featured track for: sung, or improvised. */
+export type MelodyKind = 'voice' | 'solo';
+
+/**
+ * A melody four bars long for the track a section puts forward.
+ *
+ * - `voice`: a sung line. One bar's motif of a few long notes, said again a
+ *   step away, answered by a contrasting bar, then said once more and
+ *   brought home on a chord tone, with room to breathe between the bars.
+ * - `solo`: an improvised line. Runs of eighths and sixteenths that climb to
+ *   a peak in the third bar, with wider leaps, turns and rests between the
+ *   phrases, and a long last note.
+ *
+ * Both are written on the track's own steps, so the harmony keeper still
+ * decides every pitch.
+ */
+export function writeMelody(
+  rng: Rng,
+  spec: TrackSpec,
+  machine: Machine | undefined,
+  kind: MelodyKind,
+  density: number,
+): (Trig | undefined)[] {
+  const n = MAX_TRACK_LENGTH;
+  const maxLen = machine?.maxLen ?? 6;
+  const blue = !!machine?.blueNotes;
+  if (spec.role === 'drum') return drumSolo(rng, spec, n);
+  const chordal = spec.role !== 'lead';
+  const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
+  const put = (i: number, tone: number, len: number, vel: number, extra: Partial<Trig> = {}) => {
+    if (i < 0 || i >= n) return;
+    trigs[i] = trig(1, Math.max(1, len), {
+      // Chordal parts (arps, bass, chords) keep to chord tones; a lead moves by scale steps.
+      note: chordal
+        ? { tone: ((tone % 6) + 6) % 6, chord: true, oct: tone >= 6 ? 1 : 0 }
+        : { tone, chord: false, oct: 0 },
+      vel: clamp(vel),
+      ...extra,
+    });
+  };
+
+  if (kind === 'voice') {
+    // The motif: three to five notes in one bar, mostly long, starting on or just after the beat.
+    const count = clamp(Math.round(3 + 2 * density + rng.range(-0.5, 0.5)), 3, 5);
+    const starts = rng.pick([
+      [0, 6, 8, 12],
+      [2, 4, 8, 12],
+      [0, 4, 10, 12],
+      [0, 3, 6, 10],
+      [4, 6, 8, 14],
+    ]);
+    const at = [...starts, 14].slice(0, count).sort((a, b) => a - b);
+    let deg = rng.pick([0, 2, 4]);
+    const motif = at.map((pos, j) => {
+      if (j > 0) deg += rng.pick([1, 1, -1, -1, 2, -2]);
+      deg = clamp(deg, -3, 7);
+      return { pos, tone: deg };
+    });
+    const sing = (bar: number, shift: number, cadence: boolean) => {
+      motif.forEach((m, j) => {
+        const next = motif[j + 1]?.pos ?? 16;
+        const last = j === motif.length - 1;
+        const len = last
+          ? cadence
+            ? 16 - m.pos + 4
+            : Math.min(maxLen + 2, 16 - m.pos - 2)
+          : Math.min(maxLen + 2, next - m.pos);
+        const vel = 0.62 + 0.2 * beatStrength(m.pos % 16) + rng.range(-0.04, 0.06);
+        const bend = blue && m.pos % 2 === 1 && len < 4 && rng.chance(0.3);
+        put(bar * 16 + m.pos, cadence && last ? 0 : m.tone + shift, len, vel, {
+          ...(bend && !chordal
+            ? { note: { tone: m.tone + shift, chord: false, oct: 0, blue: true } }
+            : {}),
+        });
+      });
+    };
+    const shift = rng.pick([1, 2, -1, 2]);
+    sing(0, 0, false);
+    sing(1, shift, false);
+    // The answer: other rhythm, moving the other way, ending open.
+    const answerAt = rng.pick([
+      [0, 4, 8],
+      [2, 6, 10],
+      [0, 6, 12],
+    ]);
+    let a = (motif[motif.length - 1]?.tone ?? 2) + shift;
+    answerAt.forEach((pos, j) => {
+      a = clamp(a + (j === 0 ? 2 : rng.pick([-1, -1, -2, 1])), -3, 8);
+      put(32 + pos, a, Math.min(maxLen + 2, (answerAt[j + 1] ?? 16) - pos), 0.7);
+    });
+    sing(3, 0, true);
+    return trigs;
+  }
+
+  // Solo: phrases of runs with rests between them, climbing to bar three.
+  const busy = clamp(0.45 + 0.5 * density);
+  let deg = rng.pick([0, 2, 4]);
+  let i = rng.pick([0, 2]);
+  let dir = 1;
+  while (i < n - 6) {
+    const bar = Math.floor(i / 16);
+    // How long this phrase runs before the player breathes.
+    const run = rng.int(3, bar === 2 ? 9 : 6);
+    const fast = rng.chance(bar === 2 ? 0.6 * busy : 0.3 * busy);
+    for (let k = 0; k < run && i < n - 4; k++) {
+      const stepLen = fast ? 1 : rng.pick([2, 2, 2, 3, 4]);
+      // Mostly steps along the run's direction; now and then a leap, then back by step.
+      const leap = rng.chance(0.18);
+      const move = leap ? dir * rng.pick([3, 4, 5]) : dir * rng.pick([1, 1, 1, 2]);
+      deg += move;
+      const top = bar === 2 ? 9 : 7;
+      if (deg > top || deg < -4 || leap) dir = -dir;
+      deg = clamp(deg, -4, top);
+      const last = k === run - 1;
+      const len = last ? Math.min(maxLen, stepLen + rng.int(1, 3)) : stepLen;
+      const vel =
+        0.6 + 0.22 * beatStrength(i % 16) + (bar === 2 ? 0.08 : 0) + rng.range(-0.05, 0.08);
+      const bend = blue && !chordal && i % 2 === 1 && len < 3 && rng.chance(0.3);
+      put(i, deg, len, vel, {
+        ...(bend ? { note: { tone: deg, chord: false, oct: 0, blue: true } } : {}),
+        ...(fast && rng.chance(0.12) ? { retrig: { count: 2, rate: 0.5, curve: 0.3 } } : {}),
+      });
+      i += last ? len : stepLen;
+    }
+    // A breath: an eighth to half a bar.
+    i += rng.pick([2, 2, 4, 4, 6]);
+    if (rng.chance(0.4)) dir = -dir;
+  }
+  // The last note: long, on the root.
+  const end = n - rng.pick([6, 8]);
+  for (let k = end; k < n; k++) trigs[k] = undefined;
+  put(end, 0, 6, 0.8);
+  const first = trigs.findIndex(Boolean);
+  if (first < 0) put(0, 0, 4, 0.8);
+  return trigs;
+}
+
+/** A drum's solo: its busiest pattern over four bars, with rolls, building to the last bar. */
+function drumSolo(rng: Rng, spec: TrackSpec, n: number): (Trig | undefined)[] {
+  const voice = spec.voice ?? 'perc';
+  const trigs: (Trig | undefined)[] = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i++) {
+    const bar = Math.floor(i / 16);
+    const p = (0.3 + 0.12 * bar) * (0.5 + beatStrength(i % 16)) + (i % 2 === 1 ? 0.08 * bar : 0);
+    if (i % 16 !== 0 && !rng.chance(clamp(p))) continue;
+    const t = drumTrig(rng, voice, i);
+    if (rng.chance(0.12 + 0.08 * bar)) t.retrig = randomRetrig(rng);
+    trigs[i] = t;
+  }
+  return trigs;
+}

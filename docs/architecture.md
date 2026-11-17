@@ -213,6 +213,54 @@ map is chaotic. Sensors set `r` through routes and the fine fingerprint seeds `x
 follows map A. Two starting points that differ in the tenth decimal are unrelated after a few
 dozen steps: the smallest difference in a reading ends up audible.
 
+## A piece has a form (`core/src/form`)
+
+`new Engine({ style, form: { minSeconds, maxSeconds, piece } })` plays one whole piece and then
+stays silent (`engine.ended`); the caller starts the next. Without `form` the engine goes on for
+ever, as above. Deterministic mode has no form.
+
+- **The plan.** At the first bar `planBars` picks the length inside the range from the fine
+  fingerprint, in bars at the tempo playing. Sections count in phrases (in whole 12-bar choruses
+  where the style's own sections do), each about its kind's length in seconds
+  (`sectionBars`), longer when the sensors are calm.
+- **Sections** (`SectionKind`): `intro`, `riff`, `voice`, `solo`, `break`, `outro`. At every
+  section end `chooseSection` weighs the options by the dials (`SECTION_DIAL`: energy for the
+  riff, brightness for the voice, variation for a solo, low energy for a break), drawn from
+  `hash(chain, fine hash, index)`; the sensor that drives the winning dial most is recorded as
+  `chosenBy`. No kind repeats at once but the riff (rarely), a solo waits for the riff, a break
+  for the piece to be under way, and the outro starts when what is left is its own length.
+- **Themes.** `rebuild` takes the genome a section starts from: the riff's or the voice's stored
+  genome evolved a little toward a fresh take (`FORM_RETURN`), a first voice further
+  (`FORM_NEW_VOICE`), a solo, a break and the outro over the riff (`FORM_BACKING`).
+  `openSection` then writes what the kind asks of its featured track with `writeMelody`: a sung
+  line for the voice (kept in the theme, so it comes back the same) or an improvised one for the
+  soloist (`pickSoloist`: the lead first, then others). Phrase mutations leave those tracks
+  alone (`mutatePhrase(…, keep)`).
+- **Arrangements** (`arrange`): who rests on which bar and who is put forward. An intro brings
+  the tracks in by stages (`ENTRIES`: from the air down, from the beat up, or around the riff;
+  `pickEntry`), keeping the last stage for the downbeat of the riff when it is long enough; an
+  outro lets them go in reverse. A resting track keeps counting and plays nothing; a held part
+  that comes back starts its note on the bar line. The featured track is a little louder, its
+  backing a little softer.
+- **Scenes.** In a piece a scene change waits for the end of the phrase, cuts to a section of
+  another kind (`contrast`), moves the riff theme on by the scene's rate and drops the voice
+  theme; intro and outro play out whatever the sensors do.
+- **The end.** After the outro `startFinal` brings the harmony home (`Harmony.home`) and
+  `playFinal` plays one chord on every tonal track with a kick and a cymbal, then a bar of
+  silence (`FINAL_BARS`).
+- **The record** (`form/log.ts`). `PieceRecorder` keeps, per live sensor and per bar, its mean
+  level and activity and what it moved by domain: each route's contribution in the matrix, the
+  dials it drives (shared by weight) and their own effect, the effects, accents and fills its
+  events fired. What a link holds counts a little (`CREDIT_HELD`), what it changes from one step
+  to the next counts for much more (`CREDIT_MOVED`). Marks note effects, accents, fills, scenes
+  and the sections it chose. `engine.pieceLog()` returns a copy; `sensorShares` the shares.
+- `EngineView.form` (sections so far, bar, plan, who rests, ending), `TrackView.resting` and
+  `featured`, and `EngineView.news` (what sensors did on this very step) are what the app shows.
+
+The tests play a whole piece in every style and check its form and length, the entries and exits,
+that a resting track plays nothing, that a voice returns with its line, that the same sensors
+give the same piece, and the record.
+
 ## Deterministic mode (`core/src/seeded`)
 
 `new Engine({ style, deterministic: { seed, origin, loopBars, repeat, sensors, instruments, mapping } })`
@@ -374,7 +422,15 @@ clock with short fades, and muting the FX lane silences them.
 ## Audio (`packages/audio`)
 
 - `LookaheadScheduler` wakes every 25 ms and schedules every step due in the next 120 ms on the
-  audio clock. After a stall it skips ahead instead of bursting late notes.
+  audio clock. After a stall it skips ahead instead of bursting late notes. Its ticks come from a
+  worker where there are workers: a page's own timers slow to one a second in a background tab,
+  a worker's do not. While the page is hidden the player schedules 450 ms ahead.
+- **The mix.** Each kind of track has its gain (`ROLE_MIX`: bass and kick down, leads, chords,
+  arps and the small drums up); the master is a fourth-order high-pass at 42 Hz, a low shelf, a
+  little air, the style's trim (`FxConfig.trimDb`), a gentle compressor and the soft clipper.
+  The reverb and the delay are high-passed at 220 Hz; the delay is a ping-pong; the impulse
+  response has a pre-delay and early reflections, different on each side; pad voices and detuned
+  pairs are panned apart.
 - `Renderer` builds a chain per track from its machine: instrument → low-pass filter (cutoff,
   resonance) → clean and driven paths → level → mute → pan → mix, reverb send and delay send,
   plus an analyser for the track's scope. Every step it follows the matrix with short glides; each
@@ -455,6 +511,21 @@ with its audio time and the UI shows the one that is sounding.
   its target and how it repeats; saved in prefs and applied at the next Play or Start over. The
   Song panel (`ui/changes.ts`) lists pending and applied edits with what they do, and a zone
   meter per sensor.
+
+- **The playlist** (`player.ts`, `pieces.ts`). With `Player.setPlaylist` the engine gets a
+  `form`; when it reports `ended` (or another style was picked, or _Next piece_ pressed, at the
+  next bar line) the player keeps the piece and makes a new engine seeded with the last one's
+  chain, in the same audio context. `Tape` records each piece with its own `MediaRecorder` on one
+  stream; `PieceShelf` keeps the latest three (`KEEP_PIECES`) in IndexedDB with their record.
+  `ui/pieceDiagram.ts` draws a record as a self-contained SVG; `ui/piecesView.ts` lists the
+  shelf; `ui/formStrip.ts` shows the form under the screen; `ui/effects.ts` says in words what
+  each sensor does, from the routes, the dials and the event links. `?piece=20-30` plays pieces
+  of 20 to 30 seconds, for trying it out and for the tests.
+- **The screen's shared layer** (`ui/stage/overlay.ts`): per piece a weather, an hour and a
+  passing visitor (`SceneState.vary`), and `Gfx.setTint` turns the scene's colours; a section's
+  name card with who chose it, a light and an arrow on the featured figure (a solo darkens the
+  rest), captions for what sensors just did, a meter per live sensor, an iris at the start and
+  THE END on the last chord. Resting tracks' figures sit out (`ActorState.resting`).
 
 ### Sensor sources (`apps/web/src/sensors`)
 

@@ -6,6 +6,8 @@ import {
   keyCodeIndex,
   stepDuration,
   type DeterministicOptions,
+  type FormOptions,
+  type PieceLog,
   type FxId,
   type NoteEvent,
   type SensorDescriptor,
@@ -43,6 +45,8 @@ export interface OfflineRenderOptions {
   keys?: readonly { code: string; at: number }[];
   /** Presses at given times (seconds from the start). */
   events?: readonly SensorEvent[];
+  /** Plays a piece with a form: the render stops when it ends, or after `bars`. */
+  form?: FormOptions;
 }
 
 /** The typing channel that scripted presses belong to, as the Keyboard source announces it. */
@@ -80,7 +84,7 @@ export interface RenderStats {
  */
 export async function renderOffline(
   opts: OfflineRenderOptions,
-): Promise<{ buffer: AudioBuffer; stats: RenderStats }> {
+): Promise<{ buffer: AudioBuffer; stats: RenderStats; log?: PieceLog }> {
   const { style, bars } = opts;
   const bpm = opts.bpm ?? style.defaultTempo;
   const sampleRate = opts.sampleRate ?? 44100;
@@ -95,6 +99,7 @@ export async function renderOffline(
     style,
     seed: opts.seed ?? 0,
     ...(det ? { deterministic: { ...det, origin: start } } : {}),
+    ...(opts.form && !det ? { form: opts.form } : {}),
   });
   const sensors: SensorScript =
     opts.sensors ??
@@ -151,12 +156,15 @@ export async function renderOffline(
       t,
     );
     renderer.schedule(evs, t, stepSeconds);
+    if (engine.ended) break;
   }
+  const log = engine.pieceLog();
   engine.dispose();
   const buffer = await ctx.startRendering();
   return {
     buffer,
     stats: { ...analyze(buffer), events, fx, versions, tracks: [...slots].sort() },
+    ...(log ? { log } : {}),
   };
 }
 

@@ -6,6 +6,9 @@ import { connectDetune, VoiceLimiter } from './voice';
 
 type PadPatch = Extract<Patch, { type: 'pad' }>;
 
+/** How far a pad's voices sit to either side, as a pan. */
+const PAD_WIDTH = 0.6;
+
 /**
  * Detuned oscillators through a low-pass that opens over the attack. The
  * track's `cutoff` sets how far it opens and `timbre` the detune spread.
@@ -37,10 +40,17 @@ export class PadInstrument implements Instrument {
     filter.Q.value = 0.7;
     filter.frequency.setValueAtTime(cutoff * 0.35, time);
     filter.frequency.linearRampToValueAtTime(cutoff, time + Math.max(0.05, env.a));
-    const mix = ctx.createGain();
     const n = Math.max(1, Math.round(patch.voices));
-    mix.gain.value = 1 / Math.sqrt(n);
-    mix.connect(filter).connect(vca).connect(this.output);
+    // The voices spread left and right: alternate ones to either side.
+    const sides = [-PAD_WIDTH, PAD_WIDTH].map((pan) => {
+      const side = ctx.createGain();
+      side.gain.value = 1 / Math.sqrt(n);
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = n === 1 ? 0 : pan;
+      side.connect(panner).connect(filter);
+      return side;
+    });
+    filter.connect(vca).connect(this.output);
 
     const freq = midiToFreq(ev.midi);
     const spread = patch.detune * (0.3 + 1.4 * params.timbre);
@@ -50,7 +60,7 @@ export class PadInstrument implements Instrument {
       osc.frequency.setValueAtTime(freq, time);
       osc.detune.setValueAtTime(n === 1 ? 0 : -spread / 2 + (spread * i) / (n - 1), time);
       connectDetune(osc, this.detuneMod);
-      osc.connect(mix);
+      osc.connect(sides[i % 2] as GainNode);
       osc.start(time);
       osc.stop(end);
     }

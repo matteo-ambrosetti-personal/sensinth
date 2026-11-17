@@ -216,6 +216,7 @@ export const chiptune: Style = {
     effects: ['stutter', 'crush', 'gate', 'ring', 'sweep', 'dive', 'brake'],
   },
   fx: {
+    trimDb: 4,
     reverb: [0.04, 0.3],
     delay: [0.05, 0.35],
     delaySteps: 3,

@@ -52,13 +52,15 @@ export function mutatePhrase(
   rng: Rng,
   amount: number,
   palette?: Palette,
+  /** Track slots to leave as they are: a melody a section wrote for its featured track. */
+  keep?: ReadonlySet<string>,
 ): string[] {
   const done: string[] = [];
   const count = 1 + Math.round(clamp(amount) * 4);
   for (let i = 0; i < count; i++) {
     for (let tries = 0; tries < TRIES; tries++) {
       const op = (OPS[rng.weightedIndex(OPS.map(([, w]) => w))] as [Op, number])[0];
-      const note = apply(genome, rng, op, palette);
+      const note = apply(genome, rng, op, palette, keep);
       if (note) {
         done.push(note);
         break;
@@ -68,10 +70,20 @@ export function mutatePhrase(
   return done;
 }
 
-function apply(genome: Genome, rng: Rng, op: Op, palette?: Palette): string | undefined {
+function apply(
+  genome: Genome,
+  rng: Rng,
+  op: Op,
+  palette?: Palette,
+  keep?: ReadonlySet<string>,
+): string | undefined {
   if (op === 'route') return mutateRoute(genome, rng);
   const tracks = genome.tracks.filter(
-    (t) => t.role !== 'drone' && t.role !== 'pad' && (t.role !== 'fx' || LANE_OPS.has(op)),
+    (t) =>
+      t.role !== 'drone' &&
+      t.role !== 'pad' &&
+      (t.role !== 'fx' || LANE_OPS.has(op)) &&
+      !keep?.has(t.slot),
   );
   if (tracks.length === 0) return undefined;
   const track = rng.pick(tracks);

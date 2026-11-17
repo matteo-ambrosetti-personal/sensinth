@@ -223,6 +223,7 @@ export const jazz: Style = {
     effects: ['wash', 'dubThrow', 'dive', 'sweep'],
   },
   fx: {
+    trimDb: 1.5,
     reverb: [0.1, 0.3],
     reverbSeconds: 2.2,
     delay: [0, 0.08],

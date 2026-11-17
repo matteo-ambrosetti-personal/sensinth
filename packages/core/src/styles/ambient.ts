@@ -226,6 +226,7 @@ export const ambient: Style = {
     effects: ['wash', 'dubThrow', 'sweep', 'dive', 'tapeStop'],
   },
   fx: {
+    trimDb: -1,
     reverb: [0.25, 0.6],
     reverbSeconds: 5.5,
     delay: [0.1, 0.4],

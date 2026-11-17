@@ -1,5 +1,6 @@
-import type { EngineView, FxId, NoteEvent, TrackView } from '@sensinth/core';
+import type { EngineView, FxId, NoteEvent, SectionKind, TrackView } from '@sensinth/core';
 import { Gfx, noise } from './gfx';
+import { Overlay } from './overlay';
 import { drawFloaters, type Floater, type Placed } from './kit';
 import { SCENES } from './scenes';
 
@@ -51,6 +52,10 @@ export interface ActorState {
   pos: number;
   /** Seconds left of a "!" over it: an edit just landed on it. */
   mark: number;
+  /** The arrangement rests it for now: it sits this section out. */
+  resting: boolean;
+  /** The section puts it forward: the riff's instrument, the voice, the soloist. */
+  featured: boolean;
 }
 
 /** Seconds a "!" stays over a figure after an edit lands on its track. */
@@ -80,6 +85,15 @@ export interface SceneState {
   place(key: string, at: Placed): void;
   /** Something floating up: a note, a spark. */
   float(f: Omit<Floater, 'age' | 'life'> & { life?: number }): void;
+  /** The kind of section playing, when the piece has a form. */
+  section: SectionKind | undefined;
+  /** How far through the piece, 0..1 (0 with no form). */
+  progress: number;
+  /**
+   * A choice that holds for the whole piece and differs from piece to
+   * piece: `vary('curtain', 4)` is 0..3, the same every frame of this piece.
+   */
+  vary(key: string, n: number): number;
 }
 
 export interface CastSlot {
@@ -103,6 +117,8 @@ export interface StageInput {
   styleName: string;
   bpm: number;
   isMuted(slot: string): boolean;
+  /** Every live sensor's level, for the row of little meters along the bottom. */
+  sensors?: readonly { id: string; level: number; color: string }[];
 }
 
 const IDLE: ActorState = {
@@ -122,6 +138,8 @@ const IDLE: ActorState = {
   muted: false,
   pos: 0,
   mark: 0,
+  resting: false,
+  featured: false,
 };
 
 /** What kind of part a track is, for casting. */
@@ -185,6 +203,10 @@ export class Stage {
   private label = '';
   /** When an edit last landed on each track (performance.now() ms): marks follow the clock. */
   private landed = new Map<string, number>();
+  private readonly overlay = new Overlay();
+  /** What makes this piece's picture its own: from the first genome of the piece. */
+  private pieceSeed = 1;
+  private pieceKey = '';
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     canvas.width = STAGE_W;
@@ -262,6 +284,16 @@ export class Stage {
       ? view.snapshot.step + Math.min(1, (now - this.stepAt) / 1000 / stepSeconds)
       : this.t / stepSeconds;
     const snap = view?.snapshot;
+    const form = view?.form;
+    // A new piece (or a new start) deals the picture's variations again.
+    const pieceKey = view
+      ? `${form?.piece ?? 0}:${view.drift.marks[0]?.reason ?? ''}:${sceneId}`
+      : '';
+    if (view && !snap?.waiting && pieceKey !== this.pieceKey && snap?.genome) {
+      this.pieceKey = pieceKey;
+      this.pieceSeed = (parseInt(snap.genome, 16) || 1) + (form?.piece ?? 0) * 7919;
+    }
+    const seed = this.pieceSeed;
     const state: SceneState = {
       g,
       t: this.t,
@@ -287,8 +319,31 @@ export class Stage {
           ),
       place: (key, at) => this.places.set(key, at),
       float: (f) => this.floaters.push({ ...f, age: 0, life: f.life ?? 1.2 }),
+      section: form?.sections[form.sections.length - 1]?.kind,
+      progress: form ? Math.min(1, form.bar / Math.max(1, form.totalBars)) : 0,
+      vary: (key, n) => varyOf(seed, key, n),
     };
+    // Each piece turns the scene's colours its own way: the same club, other curtains.
+    const hues = [0, 0, -24, 18, -40, 32, 60, -14];
+    g.setTint(
+      view ? (hues[varyOf(seed, 'hue', hues.length)] as number) : 0,
+      0.85 + 0.1 * varyOf(seed, 'sat', 4),
+    );
     scene.draw(state);
+    g.setTint(0);
+    // What every scene shares: the weather of this piece, the light on whoever is put
+    // forward, the section's name as it starts, what the sensors just did, their meters.
+    const featuredKey = [...this.binding].find(([, slot]) => this.states.get(slot)?.featured)?.[0];
+    this.overlay.draw({
+      g,
+      state,
+      view: state.playing ? view : undefined,
+      dt,
+      now,
+      seed,
+      featured: featuredKey ? this.places.get(featuredKey) : undefined,
+      sensors: input.sensors ?? [],
+    });
     ctx.restore();
     this.floaters = drawFloaters(g, this.floaters, dt);
     this.marks(dt);
@@ -329,6 +384,8 @@ export class Stage {
       s.pan = t.params.pan;
       s.timbre = t.params.timbre;
       s.muted = input.isMuted(t.slot);
+      s.resting = t.resting ?? false;
+      s.featured = t.featured ?? false;
       s.pos = t.length > 0 ? Math.max(0, t.position) / t.length : 0;
       if (newStep && t.fired > 0 && !s.muted) {
         s.hit = 1;
@@ -468,7 +525,9 @@ export class Stage {
   private transition(view: EngineView | undefined, dt: number): void {
     const r = view?.rebuild.step ?? -1;
     if (view && r !== this.lastRebuild) {
-      if (this.lastRebuild >= 0 && view.rebuild.reason !== 'start') this.wipe = 1;
+      // A piece's own sections come with their name card; only a new scene or style wipes.
+      const quiet = view.form !== undefined && view.rebuild.reason === 'section';
+      if (this.lastRebuild >= 0 && view.rebuild.reason !== 'start' && !quiet) this.wipe = 1;
       this.lastRebuild = r;
     }
     if (!view) this.lastRebuild = -1;
@@ -506,9 +565,15 @@ export class Stage {
       return;
     }
     const song = view?.song;
+    const form = view?.form;
+    const section = form?.sections[form.sections.length - 1];
     const right = song
       ? `LOOP ${song.loopBar + 1}/${song.loopBars}`
-      : `SEC ${(view?.snapshot.section ?? 0) + 1}`;
+      : form
+        ? form.ending
+          ? 'END'
+          : (section?.label.split(':')[0] ?? '')
+        : `SEC ${(view?.snapshot.section ?? 0) + 1}`;
     g.text(right, g.w - g.textWidth(right) - 3, 3, '#ffffff', 1, '#000000');
   }
 
@@ -519,8 +584,8 @@ export class Stage {
       .flatMap((slot) =>
         slot && this.states.get(slot) ? [this.states.get(slot) as ActorState] : [],
       );
-    const playing = parts.filter((s) => !s.muted).map((s) => s.label);
-    const resting = parts.filter((s) => s.muted).map((s) => s.label);
+    const playing = parts.filter((s) => !s.muted && !s.resting).map((s) => s.label);
+    const resting = parts.filter((s) => s.muted || s.resting).map((s) => s.label);
     const label = !input.playing
       ? `${input.styleName}: the band waits for Play`
       : !view
@@ -534,4 +599,11 @@ export class Stage {
       this.canvas.setAttribute('aria-label', label);
     }
   }
+}
+
+/** A piece-long choice among `n`, from the piece's seed and a name. */
+function varyOf(seed: number, key: string, n: number): number {
+  let h = seed | 0;
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x9e3779b1);
+  return Math.floor(noise(h) * Math.max(1, n)) % Math.max(1, n);
 }

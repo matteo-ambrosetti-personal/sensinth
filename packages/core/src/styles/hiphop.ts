@@ -195,6 +195,7 @@ export const hiphop: Style = {
     effects: ['brake', 'tapeStop', 'stutter', 'dubThrow', 'dive', 'crush', 'wash'],
   },
   fx: {
+    trimDb: 0.5,
     reverb: [0.04, 0.2],
     delay: [0.03, 0.22],
     delaySteps: 3,

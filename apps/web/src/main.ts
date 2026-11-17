@@ -6,6 +6,7 @@ import {
   SENSOR_MODES,
   STYLES,
   SensorRecorder,
+  domainOf,
   type RepeatMode,
   type SensorMode,
   getStyle,
@@ -15,6 +16,7 @@ import {
   type Style,
 } from '@sensinth/core';
 import { loadFonts } from './fonts';
+import { KEEP_PIECES, PieceShelf } from './pieces';
 import { Player } from './player';
 import { loadPrefs, savePrefs, type Prefs } from './prefs';
 import { CameraSource } from './sensors/camera';
@@ -39,6 +41,9 @@ import { AreasView } from './ui/areas';
 import { BannerView } from './ui/banner';
 import { DialsView } from './ui/dials';
 import { DriftChart } from './ui/drift';
+import { EffectsView } from './ui/effects';
+import { FormStrip } from './ui/formStrip';
+import { PiecesView } from './ui/piecesView';
 import { FlowView } from './ui/flow/flow';
 import { LabView, SOURCE_NAMES } from './ui/lab';
 import { ChangesView } from './ui/changes';
@@ -48,6 +53,7 @@ import { Scope } from './ui/scope';
 import { SensorsView } from './ui/sensors';
 import { SourcesView } from './ui/sources';
 import { Stage } from './ui/stage/stage';
+import { theme } from './ui/theme';
 import { TracksView } from './ui/tracks';
 
 loadFonts();
@@ -287,7 +293,9 @@ function renderTransport(): void {
   else if (!playing && seeded)
     hint.textContent = `Seed ${seeded.seed}: a song that loops until you change something.${tilt}`;
   else if (!playing)
-    hint.textContent = `You set tempo and style. The sensors write the rest.${tilt}`;
+    hint.textContent = `You set tempo and style. The sensors write the rest${
+      (prefs.playlist ?? true) ? ', one whole piece after another' : ''
+    }.${tilt}`;
   else if (playingSeed !== undefined)
     hint.textContent = `Seed ${playingSeed}. Each key and sensor changes the song its own way, from the next bar: the box on the screen says what and when. With no change it loops.`;
   else if (player.view()?.snapshot.waiting ?? true)
@@ -353,6 +361,65 @@ player.background.onStopRequested = () => {
   renderTransport();
 };
 renderTransport();
+
+// Playlist --------------------------------------------------------------------
+const playlistOn = $<HTMLInputElement>('playlist-on');
+const playlistStyles = $<HTMLSelectElement>('playlist-styles');
+const playlistDesc = $('playlist-desc');
+const piecesStatus = $('pieces-status');
+playlistOn.checked = prefs.playlist ?? true;
+playlistStyles.value = prefs.playlistStyles === 'sensors' ? 'sensors' : 'keep';
+
+/** `?piece=20-30` plays pieces of 20 to 30 seconds: for trying the playlist out, and for the tests. */
+const pieceSeconds = ((): [number, number] | undefined => {
+  const m = /^(\d+)-(\d+)$/.exec(new URLSearchParams(location.search).get('piece') ?? '');
+  return m ? [Number(m[1]), Number(m[2])] : undefined;
+})();
+
+function applyPlaylist(): void {
+  const on = playlistOn.checked;
+  const styles = playlistStyles.value === 'sensors' ? 'sensors' : 'keep';
+  player.setPlaylist(
+    on ? { styles, ...(pieceSeconds ? { seconds: pieceSeconds } : {}) } : undefined,
+  );
+  playlistStyles.disabled = !on;
+  prefs.playlist = on;
+  prefs.playlistStyles = styles;
+  savePrefs(prefs);
+  const later = player.playing ? ' Takes effect at the next piece, or when you start over.' : '';
+  playlistDesc.textContent = on
+    ? `Each piece lasts three to five minutes and is whole: an intro, a riff, then voice, solo and break sections as the sensors choose, an outro and a last chord. Then a new piece starts from scratch${
+        styles === 'sensors'
+          ? ', in a style and at a tempo the sensors pick: busy sensors go for the faster styles, calm ones for the slower.'
+          : ', in the style you picked, in another key and with other instruments.'
+      } The last ${KEEP_PIECES} are recorded and kept under Last pieces.${later}`
+    : `Off: one piece that never ends and drifts further and further. Nothing is recorded.${later}`;
+}
+playlistOn.addEventListener('change', applyPlaylist);
+playlistStyles.addEventListener('change', applyPlaylist);
+applyPlaylist();
+
+const shelf = new PieceShelf();
+const piecesView = new PiecesView($('pieces'), $('pieces-empty'), shelf);
+player.onPieceDone = (piece) => void shelf.add(piece);
+// The sensors picked the next piece's style and tempo: the console follows.
+player.onPieceStart = (info) => {
+  if (info.style !== style || info.bpm !== bpm) {
+    style = info.style;
+    bpm = info.bpm;
+    tempoInput.value = String(bpm);
+    tempoValue.textContent = String(bpm);
+    prefs.styleId = style.id;
+    prefs.bpm = bpm;
+    savePrefs(prefs);
+    renderStyles();
+  }
+};
+$('next-piece').addEventListener('click', (event) => {
+  if (event.detail > 0) (event.currentTarget as HTMLElement).blur();
+  player.skipPiece();
+});
+void piecesView;
 
 // Deterministic mode ---------------------------------------------------------
 const detOn = $<HTMLInputElement>('det-on');
@@ -563,6 +630,8 @@ const changesView = new ChangesView(
 const groupName = (group: string) => sources.get(group)?.label ?? SOURCE_NAMES[group] ?? group;
 const areasView = new AreasView($('areas'), $('areas-note'), groupName);
 const driftChart = new DriftChart($<HTMLCanvasElement>('drift'), $('drift-now'));
+const effectsView = new EffectsView($('does'), $('does-empty'));
+const formStrip = new FormStrip($('form'), $('form-bar'), $('form-text'));
 const banner = new BannerView($('banner'));
 const stage = new Stage($<HTMLCanvasElement>('stage'));
 const genomeSectionLabel = $('g-section-label');
@@ -607,7 +676,9 @@ function renderGenome(view: EngineView | undefined): void {
   genomeSectionLabel.textContent = song ? 'Loop' : 'Section';
   genome.section.textContent = song
     ? `bar ${song.loopBar + 1} of ${song.loopBars}`
-    : `${snap.section + 1} · phrase ${snap.phrase + 1}`;
+    : view.form
+      ? `${view.form.sections[view.form.sections.length - 1]?.label ?? '–'} · bar ${view.form.barInSection + 1}`
+      : `${snap.section + 1} · phrase ${snap.phrase + 1}`;
   genomeHashLabel.textContent = snap.seed !== undefined ? 'Seed' : 'Genome';
   genome.hash.textContent = snap.seed !== undefined ? String(snap.seed) : `#${snap.genome}`;
   genome.key.textContent = `${snap.keyName}, ${KEY_SOURCE[view.keySource]}`;
@@ -622,6 +693,26 @@ function renderGenome(view: EngineView | undefined): void {
       ? 'the seed’s own'
       : `${song.version} · ${changes} change${changes === 1 ? '' : 's'}`
     : `${REBUILD[r.reason]}${r.channel ? `: ${r.channel}` : ''}, bar ${Math.floor(r.step / 16) + 1}`;
+}
+
+/** Every live sensor's level with the colour of the first area it holds, for the screen's meters. */
+function stageSensors(): { id: string; level: number; color: string }[] {
+  const colors = theme().areas;
+  const areas = new Map<string, string>();
+  for (const g of player.partition().groups) {
+    for (const ch of g.channels) {
+      const first = ch.areas[0];
+      if (first) areas.set(ch.id, colors[domainOf(first)]);
+    }
+  }
+  return player.hub
+    .list()
+    .filter((c) => !c.stale)
+    .map((c) => ({
+      id: c.desc.id,
+      level: c.features.level,
+      color: areas.get(c.desc.id) ?? '#c0a070',
+    }));
 }
 
 let lastTracks = 0;
@@ -680,6 +771,17 @@ function frame(t: number): void {
     changesView.update(view);
     matrixView.update(view);
     driftChart.update(view);
+    formStrip.update(view, bpm);
+    if (mode === 'play') effectsView.update(channels, view, player.router, nowSeconds());
+    piecesStatus.textContent = !player.playingPieces
+      ? player.deterministic
+        ? 'off in deterministic mode'
+        : playlistOn.checked
+          ? 'ready'
+          : 'playlist off'
+      : player.canRecord
+        ? 'recording this piece'
+        : 'no recorder in this browser';
     if (snap?.waiting !== lastWaiting) {
       lastWaiting = snap?.waiting;
       renderTransport();
@@ -698,6 +800,7 @@ function frame(t: number): void {
         styleName: style.name,
         bpm,
         isMuted: (slot) => player.isMuted(slot),
+        sensors: stageSensors(),
       },
       t,
     );
